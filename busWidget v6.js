@@ -4,14 +4,14 @@
 
 const API_KEY = //GET YOUR API KEY FROM https://golemio.cz/api/ (free registration required);
 
-const STOP_IDS = //['U424Z1P', 'U424Z2P', 'U424Z1', 'U424Z2']; /*Chodovska tvrz */
-['U1040Z12P', 'U1040Z4P'] /*Andel D, F */
+const STOP_IDS = ['U424Z1P', 'U424Z2P', 'U424Z1', 'U424Z2']; /*Chodovska tvrz */
+//['U1040Z12P', 'U1040Z4P'] /*Andel D, F */
 
 const LOGO_URL = 'https://raw.githubusercontent.com/alanmakareem/pid-timetable-widget/refs/heads/main/vizualni_podoba_01-scaled.png';
 
 const MAX_DEPARTURES_TO_SHOW = 8;
 
-const USE_MOCK_DATA = false;
+const USE_MOCK_DATA = true;
 
 // --- COLORS (Dynamic for light/dark mode) ---
 const BACKGROUND = Color.dynamic(new Color("#FFFFFF"), new Color("#1C1C1E"));
@@ -46,12 +46,12 @@ async function fetchDepartures(stopIds) {
         headsign: "Sídliště Čakovice",
         scheduled: new Date(now.getTime() + 120000), // 2 min from now
         predicted: new Date(now.getTime() + 180000), // 3 min from now (delayed by 1 min)
-        arrival: new Date(now.getTime() + 180000),
+        arrival: new Date(now.getTime() + 60000),
         isDelayed: true,
         delayInSeconds: 60
       },
       {
-        line: "125",
+        line: "X125",
         headsign: "Smíchovské Nádraží",
         scheduled: new Date(now.getTime() + 240000), // 4 min from now
         predicted: new Date(now.getTime() + 240000), // on time
@@ -221,10 +221,10 @@ function addDepartureRow(widget, departure) {
   const lineStack = rowStack.addStack();
 lineStack.backgroundColor = PID_BLUE;
 lineStack.cornerRadius = 4;
-lineStack.setPadding(3, 8, 3, 8);
+lineStack.setPadding(3, 5, 3, 5);
 
 // Set a fixed width for the badge (adjust 40 as needed for your font/size)
-lineStack.size = new Size(45, 0);
+lineStack.size = new Size(55, 0);
 
 const lineText = lineStack.addText(String(departure.line));
 lineText.font = Font.boldSystemFont(16);
@@ -264,7 +264,7 @@ lineText.centerAlignText();
     if (secs_remaining <= 10) {
       timeText = "Now";
     } else if (secs_remaining < 60) {
-      timeText = "1 min";
+      timeText = "< 1 min";
     } else {
       const mins = Math.floor(secs_remaining / 60);
       timeText = `${mins} min`;
@@ -275,7 +275,7 @@ lineText.centerAlignText();
       timeText = "Now";
     } else if (secs_remaining < 60) {
       timeColor = RED_TIME;
-      timeText = "1 min";
+      timeText = "< 1 min";
     } else {
       const mins = Math.floor(secs_remaining / 60);
       timeText = `${mins} min`;
