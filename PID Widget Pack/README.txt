@@ -72,5 +72,5 @@ VERSION HISTORY
 
 CREDITS
 -------
-UI design: **Alan Makareem**  alan.fmakarim@gmail.com
+UI design: **Alan Makarim**  alan.fmakarim@gmail.com
 Data: Golemio Open Data API & Prague Integrated Transport (PID)  
