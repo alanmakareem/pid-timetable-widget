@@ -12,7 +12,7 @@
 ///////////////////////
 // --- CONFIG ---
 ///////////////////////
-const API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MzYyNCwiaWF0IjoxNzQ4NDMwMTM4LCJleHAiOjExNzQ4NDMwMTM4LCJpc3MiOiJnb2xlbWlvIiwianRpIjoiMzQyYmU1OWItYWE1NS00YjU3LTgyMTUtNjAyOTgyN2E2MmVkIn0.qjAiRqnPDKNZo51BtjlpCZWb4E8aIYPFRyOYaSC_txs";
+const API_KEY = //YOUR API KEY;
 
 const SEARCH_RADIUS_METERS = 250;
 const MAX_PLATFORM = 5;
