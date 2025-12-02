@@ -1,76 +1,74 @@
 PID Timetable Widget — README
 =============================
 
+🚋 PID Timetable Widget for Scriptable
+A smart, location-aware iOS widget for Prague Public Transport (PID). This widget runs on the Scriptable app and uses the Golemio API to provide real-time departures, delays, and platform information.
+
+✨ Key Features (v5.3.4)
+📍 GPS Location Aware: Automatically finds the nearest stops within a 250-400m radius.
+🧠 Smart Walking Filter: Calculates your walking speed (1.3 m/s) against the bus departure time. If you can't physically make it to the stop, the bus is hidden from the list.
+🏗 Platform Grouping: Departures are grouped by specific stands (e.g., Kačerov — A, Kačerov — B), so you know exactly where to wait.⏱ Real-Time Data: Shows live delays (+3 min), air-conditioning status (❄︎), and wheelchair accessibility (♿︎).
+🌑 Dark Mode Support: Fully adapts to iOS Light and Dark system themes.
+🚅 Multi-Mode Badges: Color-coded badges for Metro (A/B/C), Trams, and Buses.
+
+📲 Installation
+1. Prerequisites
+  - iPhone with iOS 16+.
+  - Scriptable App (Free).
+  - Golemio API Key (Get one for free at api.golemio.cz).
+2. Setup Guide
+-- Download the Code:
+  - Go to the PID Widget Pack folder in this repository.
+  - Copy the content of the latest version (e.g., Ver. 5.3 4.js).
+  - Open Scriptable, create a new script, and paste the code.
+-- Add the Database (Critical):
+  - This widget requires a local database of stop coordinates to work offline/quickly.
+  - Download the pid_stops_db.json file from this repository.
+  - Move this file into your iCloud Drive > Scriptable folder (or local Scriptable folder if not using iCloud).
+-- Configure API Key:
+  - Open the script you created.
+  - Find the line const API_KEY = "...".
+  - Replace the text inside the quotes with your personal Golemio API token.
+-- Add to Home Screen:
+  - Add a "Scriptable" widget to your iOS Home Screen.
+  - Set the Script parameter to your saved script name.
+  - Set Parameter (optional) or leave blank.
+
+⚙️ Configuration
+You can customize the logic at the top of the script file:
+const SEARCH_RADIUS_METERS = 250;      // How far to search for stops
+const MAX_PLATFORM = 5;                // Max number of platforms to show
+const AVERAGE_WALKING_SPEED_MPS = 1.3; // Your walking speed in meters/second
+const SHOW_NEXT_ARRIVAL_INFO = false;  // Show "➜ 14:05" preview for next bus
+
+📜 Version History
+v5.3.4 (Latest Stable)
+- Platform Grouping: Departures are now separated by platform header (e.g., "Stand A").
+- GPS Accuracy: Footer now shows GPS signal confidence (e.g., ±10m).
+- UI Polish: Slimmer dividers and "Nearby" indicator for stops <50m.
+
+v4.3.6 (Smart Commuter)
+- Walking Filter: Filters out "uncatchable" connections.
+- Absolute Time: Displays 14:35 format for departures >10 mins away.
+
+v3.3 (GPS Core)
+- GPS Logic: Moved from hardcoded IDs to Location.current() detection.
+- De-duplication: Prevents seeing the same bus twice when standing between stops.
+
+🐞 Troubleshooting
+"Database not found" Error: Ensure the file is named exactly pid_stops_db.json and is located directly in the root of the Scriptable folder in your Files app.
+"No Stops Found": The widget searches a 250m radius by default. If you are in a remote area, it will attempt to find the single nearest stop, even if it is kilometers away.
+"No Catchable Departures": This means there are buses, but based on your AVERAGE_WALKING_SPEED_MPS, the widget calculated that you cannot make it in time.
+
+📂 QA & Documentation
+For developers and contributors, this repository includes a dedicated QA folder containing:
+- Master Documentation: Full changelogs and feature breakdowns.
+- Test Reports: Comprehensive validation of GPS logic, walking filters, and platform grouping.
+- Bug Reports: A detailed log of resolved defects (e.g., the "Ghost Bus" issue or the "Trailing P" fix).
+
+📄 License
+This project is open-source. Feel free to modify and improve!
+
 BUY ME A BEER
 -------------
 paypal.me/alanmakarim
-
-OVERVIEW
---------
-PID Timetable Widget is a Scriptable script that displays real-time departure boards for Prague Integrated Transport (PID).  
-The script stores only stop coordinates locally; every timetable request goes to the official Golemio / PID API, so the widget **cannot work offline**.
-
-IMPORTANT USAGE NOTE
---------------------
-Do **NOT** place this script in a regular Home-Screen widget.  
-iOS refreshes widgets on its own schedule and the script will appear **blank** most of the time.
-
-Instead, run the script via the Shortcuts app and trigger that shortcut from:
-• Control Center (recommended)  
-• Back-Tap gesture  
-• Action button (iPhone 15 Pro)  
-• The Scriptable app itself  
-
-This on-demand model guarantees that the departure board is always current when you open it.
-
-FILE LAYOUT
------------
-/Scriptable  
- ├─ PID-Widget-4.3.1.js   ← main script with editable settings  
- └─ pid_stops_db.json     ← static list of stops (≈ 12 000 rows)  
-
-INSTALLATION
-------------
-1. Copy both files to **iCloud Drive → Scriptable**.
-2, Open the file with Scriptable and select "Add to my script" or, 
-    copy whole code in PID Widget 4.3.1, then in Scriptable tap “+”, and paste the code and save it as PID Widget 4.3.1
-3. Run the script once and grant **Location** permission so it can find nearby stops.
-
-GETTING A PERSONAL API KEY
---------------------------
-1. Visit **https://api.golemio.cz** and create a free account.  
-2. In the dashboard create a new application and copy your **API token**.  
-3. Open `PID Widget 4.3.1.js` in Scriptable and replace the placeholder:  
-   const API_KEY = "YOUR_API_KEY_HERE";
-
-CREATING A SHORTCUT & ADDING IT TO CONTROL CENTER
--------------------------------------------------
-1. Open the **Shortcuts** app → tap "+" → *New Shortcut* → rename it “PID Departures” or anything you like such as "Bus Timetable".  
-2. Tap **Add Action** → *Apps* → *Scriptable* → **Run Script**, then pick `PID Widget 4.3.1.js`.  
-3. Swipe down to access the Control Center → tap "+" on the top left → **Add a control** → select **Shortcut** app → and choose the "PID Departure" or the shortcut name you made earlier. 
-   • to change the icon, you can do it in the Shortcut app by **Choose Icon** when editing the shortcut.
-4. Arrange the shortcut on your Control Center as you like.
-Now pull down Control Center and tap the icon whenever you need up-to-date departures.
-
-ADJUSTABLE SETTINGS
--------------------
-Edit the constants at the very top of the script:
-
-API_KEY                         – your personal Golemio token (no default)  
-SEARCH_RADIUS_METERS            – radius (m) for nearby stops        [300]  
-MAX_DEPARTURES_TO_SHOW          – number of rows displayed           [7]   
-SHOW_NEXT_ARRIVAL_INFO          – merge same-platform departures     [true]  
-SORT_BY_CLOSEST_STOP_ONLY       – if true, never mixes stops         [false]  
-AVERAGE_WALKING_SPEED_MPS       – metres / second for ETA            [1.3]  
-WALKING_TIME_BUFFER_MINUTES_*   – extra minutes (default / metro)    [0 / 0.5]
-
-All colour choices and the logo are hard-coded to keep configuration simple.
-
-VERSION HISTORY
----------------
-4.3.1  Grouped “Next Arrival” logic, Control Center workflow.
-
-CREDITS
--------
-UI design: **Alan Makarim**  alan.fmakarim@gmail.com
-Data: Golemio Open Data API & Prague Integrated Transport (PID)  
