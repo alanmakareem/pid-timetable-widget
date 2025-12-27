@@ -1,74 +1,94 @@
-PID Timetable Widget — README
-=============================
+# 🚋 PID Timetable Widget for Scriptable
 
-🚋 PID Timetable Widget for Scriptable
-A smart, location-aware iOS widget for Prague Public Transport (PID). This widget runs on the Scriptable app and uses the Golemio API to provide real-time departures, delays, and platform information.
+A collection of iOS widgets for Prague Public Transport (PID) running on the [Scriptable](https://scriptable.app/) app.
+Powered by the [Golemio API](https://api.golemio.cz/), these widgets provide real-time departures, delays, and platform information directly on your Home Screen.
 
-✨ Key Features (v5.3.4)
-📍 GPS Location Aware: Automatically finds the nearest stops within a 250-400m radius.
-🧠 Smart Walking Filter: Calculates your walking speed (1.3 m/s) against the bus departure time. If you can't physically make it to the stop, the bus is hidden from the list.
-🏗 Platform Grouping: Departures are grouped by specific stands (e.g., Kačerov — A, Kačerov — B), so you know exactly where to wait.⏱ Real-Time Data: Shows live delays (+3 min), air-conditioning status (❄︎), and wheelchair accessibility (♿︎).
-🌑 Dark Mode Support: Fully adapts to iOS Light and Dark system themes.
-🚅 Multi-Mode Badges: Color-coded badges for Metro (A/B/C), Trams, and Buses.
+![PID Widget Preview](vizualni_podoba_01-scaled.png)
 
-📲 Installation
-1. Prerequisites
-  - iPhone with iOS 16+.
-  - Scriptable App (Free).
-  - Golemio API Key (Get one for free at api.golemio.cz).
-2. Setup Guide
--- Download the Code:
-  - Go to the PID Widget Pack folder in this repository.
-  - Copy the content of the latest version (e.g., Ver. 5.3 4.js).
-  - Open Scriptable, create a new script, and paste the code.
--- Add the Database (Critical):
-  - This widget requires a local database of stop coordinates to work offline/quickly.
-  - Download the pid_stops_db.json file from this repository.
-  - Move this file into your iCloud Drive > Scriptable folder (or local Scriptable folder if not using iCloud).
--- Configure API Key:
-  - Open the script you created.
-  - Find the line const API_KEY = "...".
-  - Replace the text inside the quotes with your personal Golemio API token.
--- Add to Home Screen:
-  - Add a "Scriptable" widget to your iOS Home Screen.
-  - Set the Script parameter to your saved script name.
-  - Set Parameter (optional) or leave blank.
+## 📦 Choose Your Widget
 
-⚙️ Configuration
-You can customize the logic at the top of the script file:
-const SEARCH_RADIUS_METERS = 250;      // How far to search for stops
-const MAX_PLATFORM = 5;                // Max number of platforms to show
-const AVERAGE_WALKING_SPEED_MPS = 1.3; // Your walking speed in meters/second
-const SHOW_NEXT_ARRIVAL_INFO = false;  // Show "➜ 14:05" preview for next bus
+This repository offers two main versions of the widget. Choose the one that fits your use case:
 
-📜 Version History
-v5.3.4 (Latest Stable)
-- Platform Grouping: Departures are now separated by platform header (e.g., "Stand A").
-- GPS Accuracy: Footer now shows GPS signal confidence (e.g., ±10m).
-- UI Polish: Slimmer dividers and "Nearby" indicator for stops <50m.
+| Feature | **Smart Widget (v5.3.4)** | **Static Widget (v6.0)** |
+| :--- | :--- | :--- |
+| **Best For** | 🚶 Commuting & Exploring | 🏠 Home / 🏢 Work Monitor |
+| **Stop Selection** | **Automatic (GPS)** <br> Finds nearest stops to you. | **Manual (Fixed)** <br> You define specific stop IDs. |
+| **Smart Features** | ✅ **Walking Filter**: Hides buses you can't catch.<br>✅ **Platform Grouping**: Groups by stand (A, B...). | ❌ Standard list of departures. |
+| **Setup** | **Advanced** <br> Requires installing a database file. | **Simple** <br> Copy-paste script & add API key. |
+| **File Location** | `PID Widget Pack/PID Widget 5.3.4.js` | `busWidget v6.js` |
 
-v4.3.6 (Smart Commuter)
-- Walking Filter: Filters out "uncatchable" connections.
-- Absolute Time: Displays 14:35 format for departures >10 mins away.
+---
 
-v3.3 (GPS Core)
-- GPS Logic: Moved from hardcoded IDs to Location.current() detection.
-- De-duplication: Prevents seeing the same bus twice when standing between stops.
+## 📍 Option A: Smart Widget (GPS Aware)
+*Located in `PID Widget Pack/`*
 
-🐞 Troubleshooting
-"Database not found" Error: Ensure the file is named exactly pid_stops_db.json and is located directly in the root of the Scriptable folder in your Files app.
-"No Stops Found": The widget searches a 250m radius by default. If you are in a remote area, it will attempt to find the single nearest stop, even if it is kilometers away.
-"No Catchable Departures": This means there are buses, but based on your AVERAGE_WALKING_SPEED_MPS, the widget calculated that you cannot make it in time.
+The **Smart Widget** automatically detects your location and shows departures from the nearest stops. It calculates if you can make it to the stop in time based on your walking speed.
 
-📂 QA & Documentation
-For developers and contributors, this repository includes a dedicated QA folder containing:
-- Master Documentation: Full changelogs and feature breakdowns.
-- Test Reports: Comprehensive validation of GPS logic, walking filters, and platform grouping.
-- Bug Reports: A detailed log of resolved defects (e.g., the "Ghost Bus" issue or the "Trailing P" fix).
+### ✨ Key Features
+- **GPS Location Aware**: Automatically finds stops within a 250-400m radius.
+- **Walking Filter**: Hides departures you cannot physically catch (assuming 1.3 m/s walking speed).
+- **Platform Grouping**: Groups departures by stand (e.g., "Kačerov — Stand A").
+- **Offline Database**: Uses a local JSON database for instant stop lookup.
 
-📄 License
+### 📲 Installation Guide
+1. **Download the Script**:
+   - Open `PID Widget Pack/PID Widget 5.3.4.js`.
+   - Copy the entire content.
+   - Open **Scriptable**, create a new script, and paste the code.
+2. **Add the Database (Critical)**:
+   - Download `PID Widget Pack/pid_stops_db.json`.
+   - Move this file to **iCloud Drive > Scriptable** (or the local Scriptable folder on your device).
+   - *Note: The file must be named exactly `pid_stops_db.json`.*
+3. **Configure**:
+   - Get a free API key from [api.golemio.cz](https://api.golemio.cz).
+   - In the script, replace `const API_KEY = "..."` with your key.
+
+---
+
+## 🏠 Option B: Static Widget (Fixed Stops)
+*Located in root as `busWidget v6.js`*
+
+The **Static Widget** is perfect if you always want to see departures from a specific stop (e.g., your local bus stop near home) regardless of where you are.
+
+### ✨ Key Features
+- **Simple & Fast**: No database file required.
+- **New Visuals**: Updated v6 design with color-coded delay indicators (dots).
+- **Dark Mode**: Fully supports iOS light and dark themes.
+
+### 📲 Installation Guide
+1. **Download the Script**:
+   - Open `busWidget v6.js` (or `busWidget v5.js` for older style).
+   - Copy the content into a new **Scriptable** script.
+2. **Configure**:
+   - **API Key**: Replace `const API_KEY` with your Golemio API token.
+   - **Stop IDs**: Edit the `const STOP_IDS = ['...']` array with your desired Stop IDs (found via Golemio API or PID docs).
+   - **Disable Mock Data**: Set `const USE_MOCK_DATA = false;` to see real live data.
+
+---
+
+## ⚙️ Configuration (Both Versions)
+
+You can customize the logic at the top of the script files:
+
+| Variable | Description |
+| :--- | :--- |
+| `API_KEY` | Your Golemio API Token. |
+| `MAX_DEPARTURES_TO_SHOW` | Number of rows to display (default: 8). |
+| `SEARCH_RADIUS_METERS` | *(Smart Only)* Distance to search for stops (default: 250m). |
+| `AVERAGE_WALKING_SPEED_MPS` | *(Smart Only)* Your walking speed (default: 1.3 m/s). |
+
+---
+
+## 🐞 Troubleshooting
+
+- **"Database not found" (Smart Widget)**: Ensure `pid_stops_db.json` is in the root of your Scriptable folder in the Files app.
+- **"No Catchable Departures"**: The Smart Widget hides buses if it calculates you are too far away to walk there in time.
+- **"No Stops Found"**: Try increasing `SEARCH_RADIUS_METERS` if you are in a remote area.
+
+## 📂 Project Structure
+- `PID Widget Pack/` - Contains the GPS-aware Smart Widget and the required database.
+- `busWidget v6.js` - Latest Static Widget (Manual IDs).
+- `PID Widget 2.3.js` - Legacy configurable widget (Large/Medium sizes).
+
+## 📄 License
 This project is open-source. Feel free to modify and improve!
-
-BUY ME A BEER
--------------
-paypal.me/alanmakarim
