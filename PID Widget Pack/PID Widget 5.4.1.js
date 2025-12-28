@@ -71,7 +71,8 @@ async function main() {
         console.warn("Location accuracy setting failed: " + e);
     }
 
-    const location = await Location.current();
+    // Fix Blank Screen: Race Location against a timeout (e.g. 4 seconds)
+    const location = await getLocationWithTimeout(4);
     const gpsAccuracy = location.horizontalAccuracy;
 
     let { sortedStops, distanceMap } = findAndSortNearbyStops(location, stopDatabase, SEARCH_RADIUS_METERS);
@@ -126,10 +127,21 @@ function getStopDatabase() {
   if (!fm.fileExists(path)) {
     throw new Error(`Database '${DATABASE_FILENAME}' not found.`);
   }
-  const raw = fm.readString(path);
+  // Optimize memory: allow raw string to be GC'd immediately
+  let raw = fm.readString(path);
   const db = JSON.parse(raw);
+  raw = null;
   stopDatabaseCache = db;
   return db;
+}
+
+async function getLocationWithTimeout(seconds) {
+  const timeout = new Promise((_, reject) => {
+    Timer.schedule(seconds * 1000, false, () => {
+      reject(new Error(`Location timed out after ${seconds}s`));
+    });
+  });
+  return Promise.race([Location.current(), timeout]);
 }
 
 function findSingleClosestStop(location, stopDatabase) {
