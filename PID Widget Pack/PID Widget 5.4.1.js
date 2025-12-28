@@ -22,7 +22,7 @@ const MAX_PLATFORM = 5;
 const SHOW_NEXT_ARRIVAL_INFO = false;
 const DATABASE_FILENAME = "pid_stops_db.json";
 const SORT_BY_CLOSEST_STOP_ONLY = false;
-const WIDGET_VERSION = "5.4.5";
+const WIDGET_VERSION = "5.4.1";
 
 // Walking-time
 const AVERAGE_WALKING_SPEED_MPS = 1.3;
