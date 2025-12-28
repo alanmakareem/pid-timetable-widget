@@ -12,7 +12,10 @@
 ///////////////////////
 // --- CONFIG ---
 ///////////////////////
-const API_KEY = //YOUR API KEY;
+let API_KEY = "YOUR_API_KEY";
+if (Keychain.contains("PID_API_KEY")) {
+  API_KEY = Keychain.get("PID_API_KEY");
+}
 
 const SEARCH_RADIUS_METERS = 250;
 const MAX_PLATFORM = 5;
@@ -26,9 +29,6 @@ const AVERAGE_WALKING_SPEED_MPS = 1.3;
 const WALKING_TIME_BUFFER_MINUTES_DEFAULT = 0;
 const WALKING_TIME_BUFFER_MINUTES_METRO = 0.5;
 const IGNORE_WALKING_TIME_ROUNDING_UNDER_METERS = 50;
-
-// PID logo (bottom-left)// 
-// const LOGO_URL = "https://raw.githubusercontent.com/alanmakareem/pid-timetable-widget/refs/heads/main/vizualni_podoba_01-scaled.png";
 
 ///////////////////////
 // --- THEME ---
@@ -63,6 +63,7 @@ async function main() {
   let widget;
   try {
     const stopDatabase = getStopDatabase();
+    Location.setAccuracyToHundredMeters();
     const location = await Location.current();
     const gpsAccuracy = location.horizontalAccuracy;
 
@@ -375,7 +376,7 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
 
       const left = header.addStack();
       const headerTitle = left.addText(platformCode ? `${stopName} — ${platformCode}` : `${stopName}`);
-      headerTitle.font = Font.boldSystemFont(12);
+      headerTitle.font = Font.boldSystemFont(14);
       headerTitle.textColor = COLORS.textPrimary;
       headerTitle.lineLimit = 1;
 
@@ -385,7 +386,7 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
       walk.font = Font.systemFont(10);
       walk.textColor = COLORS.textSecondary;
   
-    widget.addSpacer(4)
+    widget.addSpacer(5)
 
       for (const it of arr) {
         if (emitted >= TOTAL_ROWS) break;
@@ -393,7 +394,7 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
         emitted += 1;
         widget.addSpacer(4);
       }
-      widget.addSpacer()
+      widget.addSpacer(2)
     }
   }
 
@@ -404,13 +405,7 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
 
   const leftF = footer.addStack();
   leftF.centerAlignContent();
-  try {
-    const img = await loadImage(LOGO_URL);
-    const iv = leftF.addImage(img);
-    iv.imageSize = new Size(24, 24);
-    iv.leftAlignImage();
-  } catch (_) {}
-
+  // Logo removed
   footer.addSpacer();
   footer.addSpacer();
 
@@ -451,7 +446,7 @@ function renderDepartureRow(widget, dep, timetable, now) {
   badge.cornerRadius = 10;
 
   const lineText = badge.addText(dep.route.short_name);
-  lineText.font = Font.boldSystemFont(12);
+  lineText.font = Font.heavySystemFont(14);
   lineText.textColor = Color.white();
   lineText.lineLimit = 1;
 
@@ -468,7 +463,7 @@ function renderDepartureRow(widget, dep, timetable, now) {
   mid.spacing = 6;
 
   const headsign = mid.addText(dep.trip.headsign || "");
-  headsign.font = Font.boldSystemFont(13);
+  headsign.font = Font.semiboldSystemFont(13);
   headsign.textColor = COLORS.textPrimary;
   headsign.lineLimit = 1;
 
@@ -537,7 +532,7 @@ function renderDepartureRow(widget, dep, timetable, now) {
 
   const timeColor = (minutesUntil <= 2) ? COLORS.imminent : (isDelayed ? COLORS.delayed : COLORS.onTime);
   const timeLabel = right.addText(minutesUntil > 10 ? fmtClock(predicted) : `${minutesUntil}`);
-  timeLabel.font = Font.boldSystemFont(14);
+  timeLabel.font = Font.boldSystemFont(16);
   timeLabel.textColor = timeColor;
   timeLabel.rightAlignText();
 }
@@ -582,14 +577,6 @@ function createErrorWidget(title, message) {
   footer.centerAlignContent();
 
   const left = footer.addStack();
-  (async () => {
-    try {
-      const img = await loadImage(LOGO_URL);
-      const iv = left.addImage(img);
-      iv.imageSize = new Size(18, 18);
-    } catch (_) {}
-  })();
-
   footer.addSpacer();
 
   const ver = footer.addText(`v${WIDGET_VERSION}`);
