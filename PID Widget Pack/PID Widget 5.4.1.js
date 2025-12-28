@@ -1,604 +1,662 @@
-// --- COMMON CONFIGURATION ---
+// Variables used by Scriptable.
+// These must be at the very top of the file. Do not edit.
+// icon-color: teal; icon-glyph: bus;
+// Variables used by Scriptable.
+// These must be at the very top of the file. Do not edit.
+// icon-color: deep-brown; icon-glyph: magic;
+
+// PID Timetable Widget (v5.4.1)
+// - Queries base and P IDs (v4.3.6 parity)
+// - Groups by canonical platform (ensureP), header shows base stop name (no trailing P)
+
+///////////////////////
+// --- CONFIG ---
+///////////////////////
 let API_KEY = "YOUR_API_KEY";
 if (Keychain.contains("PID_API_KEY")) {
   API_KEY = Keychain.get("PID_API_KEY");
 }
 
-const LOGO_URL = 'https://raw.githubusercontent.com/alanmakareem/pid-timetable-widget/refs/heads/main/vizualni_podoba_01-scaled.png';
-const USE_MOCK_DATA = false; // Set to true to use mock data for testing both widgets
+const SEARCH_RADIUS_METERS = 250;
+const MAX_PLATFORM = 5;
+const SHOW_NEXT_ARRIVAL_INFO = false;
+const DATABASE_FILENAME = "pid_stops_db.json";
+const SORT_BY_CLOSEST_STOP_ONLY = false;
+const WIDGET_VERSION = "5.4.1";
 
-// --- COMMON COLORS (Dynamically adapt to light/dark mode) ---
-// Visual Parameter: Kept as is from your file
-const BACKGROUND = Color.dynamic(new Color("#FFFFFF"), new Color("#1C1C1E"));
-const TEXT_BLACK = Color.dynamic(new Color("#000000"), new Color("#FFFFFF"));
-const RED_TIME = Color.dynamic(new Color("#E53E3E"), new Color("#FF453A"));
-const ORANGE_TIME = Color.dynamic(new Color("#FFA500"), new Color("#FFB340"));
-const GREEN_TIME = Color.dynamic(new Color("#34C759"), new Color("#30D158"));
-const GRAY_TEXT = Color.dynamic(new Color("#8E8E93"), new Color("#CCCCCC"));
-const AC_BLUE = Color.dynamic(new Color("#007AFF"), new Color("#5AC8FA"));
-const PID_BLUE_LARGE = new Color("#005C9E");
+// Walking-time
+const AVERAGE_WALKING_SPEED_MPS = 1.3;
+const WALKING_TIME_BUFFER_MINUTES_DEFAULT = 0;
+const WALKING_TIME_BUFFER_MINUTES_METRO = 0.5;
+const IGNORE_WALKING_TIME_ROUNDING_UNDER_METERS = 50;
 
-// --- CONFIGURATION FOR STOP IDs ---
-// --- LARGE WIDGET CONFIGURATION ---
-// Visual Parameter Context: These values determine data, not direct visual styling of elements.
-const STOP_ASW_IDS_LARGE = []; // From your file
-const STOP_CIS_IDS_LARGE = ['56793']; // From your file
-const MAX_DEPARTURES_TO_SHOW_LARGE = 10; // From your file
+///////////////////////
+// --- THEME ---
+///////////////////////
+const COLORS = {
+  background: Color.dynamic(new Color("#F2F2F7"), new Color("#1C1C1E")),
+  textPrimary: Color.dynamic(Color.black(), Color.white()),
+  textSecondary: Color.dynamic(Color.darkGray(), Color.gray()),
+  acBlue: Color.dynamic(new Color("#007AFF"), new Color("#5AC8FA")),
+  wheelchairBlue: Color.dynamic(new Color("#007AFF"), new Color("#5AC8FA")),
+  onTime: new Color("#4CAF50"),
+  delayed: new Color("#FF9800"),
+  imminent: new Color("#F44336"),
+  badgeBus: new Color("#007AFF"),
+  badgeTram: new Color("#960606"),
+  badgeMetroA: new Color("#00954D"),
+  badgeMetroB: Color.dynamic(new Color("#E67E00"), new Color("#FF9800")),
+  badgeMetroC: new Color("#DC041D"),
+};
 
-// --- MEDIUM WIDGET CONFIGURATION ---
-// Visual Parameter Context: These values determine data.
-const STOP_ASW_IDS_MEDIUM = ['U337Z3P', null]; // From your file (null is handled by filter)
-const STOP_CIS_IDS_MEDIUM = ['28003', '27883']; // From your file
-const DEPARTURES_PER_STOP_MEDIUM = 6; // From your file
+///////////////////////
+// --- GLOBAL CACHE ---
+///////////////////////
+let stopDatabaseCache = null;
 
-// --- Constant for UI calculation (Improved for readability) ---
-const APPROX_ROW_TOTAL_HEIGHT_LARGE = 26 + 4; // row height + bottom spacer from your large widget layout
+///////////////////////
+// --- MAIN ---
+///////////////////////
+await main();
 
-// ==========================================================================================
-// --- INTERNAL HELPER FUNCTION FOR FETCHING AND PARSING DEPARTURES ---
-// ==========================================================================================
-async function _fetchAndParseDepartures(apiUrl, idTypeForLog, stopNameOnError = "Error Loading") {
-    const req = new Request(apiUrl);
-    req.headers = { 'x-access-token': API_KEY };
+async function main() {
+  let widget;
+  try {
+    const stopDatabase = getStopDatabase();
 
+    // Set accuracy for speed, but only if we haven't timed out or errored yet
     try {
-        console.log(`Attempting to fetch from: ${apiUrl} (using ${idTypeForLog})`);
-        const data = await req.loadJSON();
-
-        let stopName = stopNameOnError; // Default stop name
-        // Corrected Logic: Determine stopName if possible, but don't gate departure processing on it.
-        if (data && data.stops && data.stops.length > 0) {
-            stopName = data.stops[0].stop_name;
-        }
-
-        // Corrected Logic: Process departures if they exist, independently of data.stops
-        if (data && data.departures && data.departures.length > 0) {
-            const mapped = (data.departures || []).map(dep => {
-                const scheduled = dep.departure_timestamp.scheduled ? new Date(dep.departure_timestamp.scheduled) : null;
-                const predicted = dep.departure_timestamp.predicted ? new Date(dep.departure_timestamp.predicted) : scheduled;
-                if (!scheduled) return null;
-                const delaySeconds = (predicted - scheduled) / 1000;
-                const isDelayed = delaySeconds > 59;
-                const airConditioned = dep.trip && dep.trip.is_air_conditioned === true;
-                return {
-                    line: dep.route ? dep.route.short_name : 'N/A',
-                    headsign: dep.trip ? dep.trip.headsign : 'N/A',
-                    scheduled: scheduled,
-                    predicted: predicted,
-                    arrival: predicted,
-                    isDelayed: isDelayed,
-                    delayInSeconds: delaySeconds > 0 ? Math.round(delaySeconds) : 0,
-                    airConditioned: airConditioned
-                };
-            }).filter(dep => dep !== null && dep.arrival && !isNaN(dep.arrival.getTime()));
-
-            const now = new Date();
-            const futureDates = mapped.filter(dep => (dep.arrival - now) > -30000);
-            futureDates.sort((a, b) => a.arrival - b.arrival);
-
-            if (futureDates.length > 0) {
-                console.log(`Successfully fetched and parsed ${futureDates.length} departures using ${idTypeForLog} IDs for stop: ${stopName}`);
-                return { departures: futureDates, stopName: stopName, success: true };
-            } else {
-                console.log(`No *future* departures found using ${idTypeForLog} IDs for stop: ${stopName} (Raw departures: ${mapped.length})`);
-                // Return the determined stopName even if no future departures
-                return { departures: [], stopName: stopName, success: false, noFutureDepartures: true };
-            }
-        } else { // No data.departures or empty array
-            console.log(`No departures array or empty departures in response using ${idTypeForLog} IDs. Data: ${JSON.stringify(data).substring(0,200)}`);
-            // Return the determined stopName (could be from data.stops or the default onError name)
-            return { departures: [], stopName: stopName, success: false };
-        }
-    } catch (e) {
-        console.error(`API Error using ${idTypeForLog} IDs from ${apiUrl}: ${e}`);
-        return { departures: [], stopName: stopNameOnError, success: false, error: e.toString() };
-    }
-}
-
-// ==========================================================================================
-// --- LARGE WIDGET FUNCTIONS ---
-// Moved to top level for correct scope
-// ==========================================================================================
-async function fetchDeparturesForLargeWidget(aswIds, cisIds) {
-    if (USE_MOCK_DATA) {
-        const now = new Date();
-        const mockDeparturesBase = [
-            { line: "M213", headsign: "Želivského (Mock)", scheduled: new Date(now.getTime() + 60000), predicted: new Date(now.getTime() + 60000), arrival: new Date(now.getTime() + 60000), isDelayed: false, delayInSeconds: 0, airConditioned: true },
-            { line: "M136", headsign: "S. Čakovice (Mock)", scheduled: new Date(now.getTime() + 120000), predicted: new Date(now.getTime() + 180000), arrival: new Date(now.getTime() + 180000), isDelayed: true, delayInSeconds: 60, airConditioned: false },
-        ];
-        let fullMockDepartures = [];
-        for (let i = 0; i < MAX_DEPARTURES_TO_SHOW_LARGE; i++) {
-            const baseDep = mockDeparturesBase[i % mockDeparturesBase.length];
-            fullMockDepartures.push({...baseDep, arrival: new Date(now.getTime() + (i + 1) * 2 * 60000), headsign: `${baseDep.headsign} #${i+1}` });
-        }
-        // Corrected: return statement moved outside the loop
-        return { departures: fullMockDepartures, stopName: "Mock Large Widget", success: true };
+        Location.setAccuracyToHundredMeters();
+    } catch(e) {
+        console.warn("Location accuracy setting failed: " + e);
     }
 
-    let result = { success: false, departures: [], stopName: "Error Large Widget" };
-    const validAswIds = aswIds ? aswIds.filter(id => id && id.trim() !== '') : [];
-    const validCisIds = cisIds ? cisIds.filter(id => id && id.trim() !== '') : [];
+    const location = await Location.current();
+    const gpsAccuracy = location.horizontalAccuracy;
 
-    if (validAswIds.length > 0) {
-        const aswIdParams = validAswIds.map(id => `ids[]=${encodeURIComponent(id)}`).join('&');
-        const aswUrl = `https://api.golemio.cz/v2/pid/departureboards?${aswIdParams}&limit=20&minutesAfter=120`;
-        result = await _fetchAndParseDepartures(aswUrl, "ASW (Large)");
+    let { sortedStops, distanceMap } = findAndSortNearbyStops(location, stopDatabase, SEARCH_RADIUS_METERS);
+
+    if (sortedStops.length === 0) {
+      const closest = findSingleClosestStop(location, stopDatabase);
+      if (closest) {
+        const newRadius = closest.distance + 50;
+        const expanded = findAndSortNearbyStops(location, stopDatabase, newRadius);
+        sortedStops = expanded.sortedStops;
+        distanceMap = expanded.distanceMap;
+      } else {
+        widget = createErrorWidget("No Stops Found", "Could not find any stops in the database.");
+        return finalize(widget);
+      }
     }
 
-    if (!result.success || result.departures.length === 0) {
-        if (validCisIds.length > 0) {
-            console.log("ASW IDs failed or yielded no data for Large Widget, trying CIS IDs.");
-            const cisIdParams = validCisIds.map(id => `cisIds[]=${encodeURIComponent(id)}`).join('&');
-            const cisUrl = `https://api.golemio.cz/v2/pid/departureboards?${cisIdParams}&limit=20&minutesAfter=120`;
-            const cisResult = await _fetchAndParseDepartures(cisUrl, "CIS (Large)");
-            if (cisResult.success || !result.success ) {
-                result = cisResult;
-            } else if (result.success && result.departures.length === 0 && cisResult.noFutureDepartures) {
-                // Removed: result.stopName = result.stopName; (redundant)
-            }
-        } else {
-            if (!result.success) console.log("No valid CIS IDs provided for Large Widget fallback.");
-        }
-    }
+    // Query BOTH base and P-suffixed IDs (v4.3.6 parity)
+    const finalStopIdsToQuery = getFinalStopIdList(sortedStops);
+    const apiResponse = await getDepartureData(finalStopIdsToQuery);
 
-    // Improved User-Facing Error Messages for UI
-    if (!result.success && result.error) result.stopName = "API Error";
-    else if (result.departures.length === 0 && !result.noFutureDepartures && result.stopName === "Error Large Widget") result.stopName = "No Stops Defined";
-    else if (result.departures.length === 0 && result.noFutureDepartures && result.stopName === "Error Large Widget") result.stopName = "No Data"; // More generic if stop name wasn't resolved
-
-    return result;
-}
-
-function addDepartureRowLargeWidget(widget, departure) {
-    // Visual Parameters: Kept as is from your file
-    const rowStack = widget.addStack();
-    rowStack.layoutHorizontally();
-    rowStack.centerAlignContent();
-    rowStack.spacing = 10;
-    rowStack.size = new Size(0, 20);
-
-    const lineStack = rowStack.addStack();
-    lineStack.backgroundColor = PID_BLUE_LARGE;
-    lineStack.cornerRadius = 4;
-    lineStack.setPadding(3, 5, 3, 5);
-    lineStack.size = new Size(50, 0);
-    const lineText = lineStack.addText(String(departure.line));
-    lineText.font = Font.boldSystemFont(12);
-    lineText.textColor = new Color("#FFFFFF");
-    lineText.centerAlignText();
-
-    const directionStack = rowStack.addStack();
-    directionStack.layoutHorizontally();
-    directionStack.centerAlignContent();
-    const directionText = directionStack.addText(String(departure.headsign));
-    directionText.font = Font.boldSystemFont(12);
-    directionText.textColor = TEXT_BLACK;
-    directionText.lineLimit = 1;
-    directionText.minimumScaleFactor = 0.8;
-
-    if (departure.airConditioned) {
-        const acText = directionStack.addText(" ❄︎");
-        acText.font = Font.boldSystemFont(14);
-        acText.textColor = AC_BLUE;
-    }
-
-    rowStack.addSpacer();
-
-    const timeStack = rowStack.addStack();
-    timeStack.layoutHorizontally();
-    timeStack.centerAlignContent();
-    const now_time = new Date();
-    const arrival = departure.arrival;
-
-    if (!arrival || isNaN(arrival.getTime())) {
-        const timeLabel = timeStack.addText("?? min");
-        timeLabel.font = Font.boldSystemFont(12);
-        timeLabel.textColor = GRAY_TEXT;
-        return;
-    }
-
-    const secs_remaining = (arrival - now_time) / 1000;
-    let timeColor, timeText, showDot = false;
-
-    if (departure.isDelayed) {
-        timeColor = ORANGE_TIME;
-        showDot = true;
-        if (secs_remaining <= 10) { timeText = "Now"; }
-        else if (secs_remaining < 60) { timeText = "< 1 min"; }
-        else { timeText = `${Math.floor(secs_remaining / 60)} min`; }
+    if (!apiResponse.departures || apiResponse.departures.length === 0) {
+      widget = createErrorWidget("No Departures Found", "Stops found, but they have no upcoming departures.");
     } else {
-        if (secs_remaining <= 10) { timeColor = RED_TIME; timeText = "Now"; }
-        else if (secs_remaining < 60) { timeColor = RED_TIME; timeText = "< 1 min"; }
-        else {
-            timeText = `${Math.floor(secs_remaining / 60)} min`;
-            timeColor = GREEN_TIME;
-        }
+      widget = await createWidget(apiResponse, distanceMap, gpsAccuracy);
     }
-
-    if (showDot) {
-        const dot = timeStack.addText("● ");
-        dot.textColor = timeColor;
-        dot.font = Font.boldSystemFont(8);
+  } catch (e) {
+    console.error(e);
+    widget = createErrorWidget("Error", e.message || "Unknown error.");
+  } finally {
+    // If widget is still null (e.g. main logic failed hard without setting it), create a fallback
+    if (!widget) {
+        widget = createErrorWidget("Critical Error", "Widget failed to initialize.");
     }
-    const timeLabel = timeStack.addText(timeText);
-    timeLabel.font = Font.boldSystemFont(14);
-    timeLabel.textColor = timeColor;
+    finalize(widget);
+  }
 }
 
-async function createLayoutLargeWidget(widget, departuresData) {
-    const { departures, stopName } = departuresData;
-    // Visual Parameters: Kept as is from your file
-    widget.backgroundColor = BACKGROUND;
-    widget.setPadding(15, 15, 15, 15);
-
-    const headerStack = widget.addStack();
-    headerStack.layoutHorizontally();
-    headerStack.centerAlignContent();
-    try {
-        const logoReq = new Request(LOGO_URL);
-        const logoImg = await logoReq.loadImage();
-        const logo = headerStack.addImage(logoImg);
-        logo.imageSize = new Size(50, 35);
-        logo.cornerRadius = 4;
-    } catch (e) {
-        const logoText = headerStack.addText("PID");
-        logoText.font = Font.boldSystemFont(14);
-        logoText.textColor = PID_BLUE_LARGE;
-    }
-
-    headerStack.addSpacer(); // move stop name to right
-    const stopNameText = headerStack.addText(stopName || "Loading...");
-    stopNameText.font = Font.boldSystemFont(24);
-    stopNameText.lineLimit = 1;
-    stopNameText.textColor = TEXT_BLACK;
-    stopNameText.minimumScaleFactor = 0.7;
-    widget.addSpacer(12);
-
-    const departureCountToShow = Math.min(MAX_DEPARTURES_TO_SHOW_LARGE, departures ? departures.length : 0);
-    if (departureCountToShow === 0) {
-        const noBusText = widget.addText(departuresData.success && departuresData.noFutureDepartures ? "No future departures." : (departuresData.success ? "No departures available." : (stopName === "API Error" ? "API Error" : "Could not load departures.")));
-        noBusText.font = Font.systemFont(14);
-        noBusText.textColor = GRAY_TEXT;
-        noBusText.centerAlignText();
-    } else {
-        for (let i = 0; i < departureCountToShow; i++) {
-            addDepartureRowLargeWidget(widget, departures[i]);
-            if (i < departureCountToShow - 1) widget.addSpacer(4);
-        }
-    }
-
-    for (let i = departureCountToShow; i < MAX_DEPARTURES_TO_SHOW_LARGE; i++) {
-        widget.addSpacer(8 + APPROX_ROW_TOTAL_HEIGHT_LARGE); // Used constant for clarity
-    }
-
-    widget.addSpacer();
-    const divider = widget.addStack();
-    divider.addSpacer();
-    const ctx = new DrawContext();
-    ctx.size = new Size(500, 4);
-    ctx.opaque = false;
-    ctx.setFillColor(RED_TIME);
-    ctx.fillRect(new Rect(0, 0, ctx.size.width, 3));
-    divider.addImage(ctx.getImage());
-    divider.addSpacer();
-    widget.addSpacer();
-
-    const bottomStack = widget.addStack();
-    bottomStack.layoutHorizontally();
-    bottomStack.centerAlignContent();
-    const legendStack = bottomStack.addStack();
-    legendStack.layoutHorizontally();
-    const dot = legendStack.addText("●");
-    dot.textColor = ORANGE_TIME;
-    dot.font = Font.mediumSystemFont(10);
-    const labelText = legendStack.addText(" Delayed ");
-    labelText.font = Font.systemFont(10);
-    labelText.textColor = GRAY_TEXT;
-    bottomStack.addSpacer();
-    const now_footer = new Date();
-    const timeStr = `${now_footer.getHours().toString().padStart(2, '0')}:${now_footer.getMinutes().toString().padStart(2, '0')}`;
-    const updateText = bottomStack.addText(`Updated: ${timeStr}`);
-    updateText.font = Font.systemFont(10);
-    updateText.textColor = GRAY_TEXT;
-    updateText.textOpacity = 0.8;
-    updateText.rightAlignText();
+function finalize(widget) {
+  if (config.runsInWidget) Script.setWidget(widget);
+  else (async () => { await widget.presentLarge(); })();
+  Script.complete();
 }
 
-async function createLargeWidget() {
-    const widget = new ListWidget();
-    widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);
-    const departuresData = await fetchDeparturesForLargeWidget(STOP_ASW_IDS_LARGE, STOP_CIS_IDS_LARGE);
-    await createLayoutLargeWidget(widget, departuresData);
-    return widget;
+//////////////////////////////
+// --- DATA & HELPERS ---
+//////////////////////////////
+function getStopDatabase() {
+  if (stopDatabaseCache) return stopDatabaseCache;
+  const fm = FileManager.local();
+  const path = fm.joinPath(fm.documentsDirectory(), DATABASE_FILENAME);
+  if (!fm.fileExists(path)) {
+    throw new Error(`Database '${DATABASE_FILENAME}' not found.`);
+  }
+  const raw = fm.readString(path);
+  const db = JSON.parse(raw);
+  stopDatabaseCache = db;
+  return db;
 }
 
-// ==========================================================================================
-// --- MEDIUM WIDGET FUNCTIONS ---
-// Moved to top level for correct scope
-// ==========================================================================================
-async function fetchDeparturesForMediumWidgetStop(aswId, cisId, stopIndex) {
-    const stopLogErrorSuffix = `(Medium Stop ${stopIndex + 1})`;
-    if (USE_MOCK_DATA) {
-        const now = new Date();
-        let stopNameMock = `Mock Stop ${stopIndex + 1}`;
-        let lineStart = (stopIndex === 0) ? 100 : 200;
-        return {
-            stopName: stopNameMock,
-            departures: Array(DEPARTURES_PER_STOP_MEDIUM).fill(null).map((_, i) => ({
-                line: `M${lineStart + i * 10}`,
-                headsign: `Mock Dest ${String.fromCharCode(65 + i)}`,
-                arrival: new Date(now.getTime() + (i + 1) * 3 * 60000),
-                isDelayed: i % 2 === 0,
-                airConditioned: i % 3 === 0
-            })),
-            success: true
-        };
-    }
-
-    let result = { success: false, departures: [], stopName: `Error Stop ${stopIndex + 1}` };
-    if (aswId && aswId.trim() !== '') {
-        const aswUrl = `https://api.golemio.cz/v2/pid/departureboards?ids[]=${encodeURIComponent(aswId)}&limit=10&minutesAfter=120`;
-        result = await _fetchAndParseDepartures(aswUrl, `ASW ${stopLogErrorSuffix}`, `Error ASW ${stopIndex + 1}`);
-    }
-
-    if (!result.success || result.departures.length === 0) {
-        if (cisId && cisId.trim() !== '') {
-            console.log(`ASW ID failed or yielded no data for ${stopLogErrorSuffix}, trying CIS ID.`);
-            const cisUrl = `https://api.golemio.cz/v2/pid/departureboards?cisIds[]=${encodeURIComponent(cisId)}&limit=10&minutesAfter=120`;
-            const cisResult = await _fetchAndParseDepartures(cisUrl, `CIS ${stopLogErrorSuffix}`, `Error CIS ${stopIndex + 1}`);
-            if (cisResult.success || !result.success) {
-                result = cisResult;
-            } else if (result.success && result.departures.length === 0 && cisResult.noFutureDepartures) {
-                // Removed: result.stopName = result.stopName; (redundant)
-            }
-        } else {
-            if (!result.success) console.log(`No valid CIS ID provided for ${stopLogErrorSuffix} fallback.`);
-        }
-    }
-
-    // Improved User-Facing Error Messages for UI
-    if (!result.success && result.error) result.stopName = `Stop ${stopIndex+1} API Error`;
-    else if (result.departures.length === 0 && !result.noFutureDepartures && result.stopName.startsWith("Error Stop")) result.stopName = `No ID Stop ${stopIndex+1}`;
-    else if (result.departures.length === 0 && result.noFutureDepartures && result.stopName.startsWith("Error Stop")) result.stopName = `Stop ${stopIndex+1} No Data`;
-
-
-    if (result.success && result.departures) {
-        result.departures = result.departures.slice(0, DEPARTURES_PER_STOP_MEDIUM);
-    }
-    return result;
+function findSingleClosestStop(location, stopDatabase) {
+  if (!stopDatabase || stopDatabase.length === 0) return null;
+  return stopDatabase
+    .map(stop => ({
+      id: stop.id,
+      name: stop.name,
+      distance: haversineDistance(location.latitude, location.longitude, stop.lat, stop.lon),
+    }))
+    .sort((a, b) => a.distance - b.distance)[0];
 }
 
-function timeInfoMediumWidget(dep) {
-    // Visual Parameters: Kept as is from your file
-    const now = new Date();
-    const secs = (dep.arrival - now) / 1000;
-    let color, text;
-    if (dep.isDelayed) {
-        color = ORANGE_TIME;
-        if (secs <= 10) text = "!!";
-        else if (secs < 60) text = "0";
-        else text = `${Math.floor(secs / 60)}`;
-    } else {
-        if (secs <= 10) { color = RED_TIME; text = "!!"; }
-        else if (secs < 60) { color = RED_TIME; text = "0"; }
-        else { color = GREEN_TIME; text = `${Math.floor(secs / 60)}`; }
+function findAndSortNearbyStops(location, stopDatabase, radiusMeters) {
+  const { latitude, longitude } = location;
+  const latDelta = radiusMeters / 111000;
+  const lonDelta = radiusMeters / (111000 * Math.cos(latitude * Math.PI / 180));
+  const minLat = latitude - latDelta;
+  const maxLat = latitude + latDelta;
+  const minLon = longitude - lonDelta;
+  const maxLon = longitude + lonDelta;
+
+  const nearby = [];
+  const distanceMap = {};
+  const box = stopDatabase.filter(
+    s => s.lat >= minLat && s.lat <= maxLat && s.lon >= minLon && s.lon <= maxLon
+  );
+
+  box.forEach(s => {
+    const d = haversineDistance(latitude, longitude, s.lat, s.lon);
+    if (d <= radiusMeters) {
+      nearby.push({ id: s.id, distance: d });
+      const baseId = s.id.endsWith('P') ? s.id.slice(0, -1) : s.id;
+      distanceMap[baseId] = d;
     }
-    return { color, text };
+  });
+
+  return { sortedStops: nearby.sort((a, b) => a.distance - b.distance), distanceMap };
 }
 
-function createDepartureColumnMediumWidget(parentStack, departuresData, stopIndex) {
-    const { departures, stopName, success, noFutureDepartures } = departuresData;
-    // Visual Parameters: Kept as is from your file
-    const column = parentStack.addStack();
-    column.layoutVertically();
-
-    if (!departures || departures.length === 0) {
-        let message = `No departures for\n${(stopName || `Stop ${stopIndex + 1}`).split(" (")[0]}.`;
-        if (success && noFutureDepartures) message = `No future deps for\n${(stopName || `Stop ${stopIndex + 1}`).split(" (")[0]}.`;
-        else if (!success && stopName && (stopName.includes("API Error") || stopName.startsWith("Err") || stopName.startsWith("No ID"))) message = `${stopName}`; // Show specific error
-        else if (!success) message = `Could not load for\n${(stopName || `Stop ${stopIndex + 1}`).split(" (")[0]}.`;
-
-        const noDepText = column.addText(message);
-        noDepText.font = Font.systemFont(10);
-        noDepText.textColor = GRAY_TEXT;
-        noDepText.centerAlignText();
-        column.addSpacer();
-        return column;
-    }
-
-    for (const dep of departures) {
-        const row = column.addStack();
-        row.layoutHorizontally();
-        row.centerAlignContent();
-        row.spacing = 1; // Visual Parameter: Kept as 1 from your file
-
-        const lineStack = row.addStack();
-        lineStack.size = new Size(35, 0);
-        lineStack.layoutHorizontally();
-        const lineText = lineStack.addText(dep.line);
-        lineText.font = Font.boldSystemFont(12);
-        lineText.textColor = TEXT_BLACK;
-        lineStack.addSpacer(2); // Visual Parameter: Kept as 2 from your file
-
-        const dirStack = row.addStack();
-        dirStack.size = new Size(70, 0);
-        dirStack.layoutHorizontally();
-        const dirText = dirStack.addText(dep.headsign);
-        dirText.font = Font.systemFont(14);
-        dirText.textColor = TEXT_BLACK;
-        dirText.lineLimit = 1;
-        dirText.minimumScaleFactor = 0.8;
-        dirStack.addSpacer(); // Visual Parameter: Kept as flexible spacer (no arg) from your file
-
-        row.addSpacer();
-
-        const acTimeStack = row.addStack();
-        acTimeStack.layoutHorizontally();
-        acTimeStack.centerAlignContent();
-        if (dep.airConditioned) {
-            const acText = acTimeStack.addText("❄︎");
-            acText.font = Font.systemFont(10);
-            acText.textColor = AC_BLUE;
-            acTimeStack.addSpacer(2); // Visual Parameter: Kept as 2 from your file
-        }
-        const { color, text: timeValue } = timeInfoMediumWidget(dep);
-        const timeText = acTimeStack.addText(timeValue);
-        timeText.font = Font.boldSystemFont(12);
-        timeText.textColor = color;
-        column.addSpacer(2); // Visual Parameter: Kept as 2 from your file
-    }
-    return column;
+// v4.3.6-compatible: add base and P for each seen stop id
+function getFinalStopIdList(sortedStops) {
+  const idSet = new Set();
+  const list = SORT_BY_CLOSEST_STOP_ONLY ? sortedStops.slice(0, 1) : sortedStops;
+  list.forEach(s => {
+    const base = s.id.endsWith('P') ? s.id.slice(0, -1) : s.id;
+    idSet.add(base);
+    idSet.add(base + 'P');
+  });
+  return Array.from(idSet);
 }
 
-async function createMediumWidget() {
-    // Visual Parameters: Kept as is from your file
-    const widget = new ListWidget();
-    widget.backgroundColor = BACKGROUND;
-    widget.setPadding(20, 15, 15, 15);
-    widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);
+function haversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const φ1 = lat1 * Math.PI/180;
+  const φ2 = lat2 * Math.PI/180;
+  const Δφ = (lat2-lat1) * Math.PI/180;
+  const Δλ = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
 
-    // Improved: Slice before map to avoid unnecessary processing if STOP_ASW_IDS_MEDIUM has >2 elements
-    const stopDataPromises = STOP_ASW_IDS_MEDIUM.slice(0, 2).map((aswId, index) => {
-        const cisId = (STOP_CIS_IDS_MEDIUM[index] || ''); // Fallback to empty if CIS array is shorter or element is undefined
-        return fetchDeparturesForMediumWidgetStop(aswId || '', cisId, index);
+async function getDepartureData(stopIds) {
+  const idParams = stopIds.map(id => `ids[]=${encodeURIComponent(id)}`).join('&');
+  const url = `https://api.golemio.cz/v2/pid/departureboards?${idParams}&limit=60&minutesAfter=90&includeMetroTrains=true`;
+  const req = new Request(url);
+  req.headers = { "X-Access-Token": API_KEY };
+  return await req.loadJSON();
+}
+
+function getBadgeBackgroundColor(dep) {
+  switch (dep.route.type) {
+    case 1:
+      switch (dep.route.short_name) {
+        case 'A': return COLORS.badgeMetroA;
+        case 'B': return COLORS.badgeMetroB;
+        case 'C': return COLORS.badgeMetroC;
+        default: return COLORS.badgeBus;
+      }
+    case 0:
+      return COLORS.badgeTram;
+    default:
+      return COLORS.badgeBus;
+  }
+}
+
+//////////////////////////////
+// --- WIDGET (grouped) ---
+//////////////////////////////
+async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
+  const { departures, stops } = apiResponse;
+
+  // Metadata keyed by baseId; also accessible by baseId+'P'
+  const stopDataMap = {};
+  if (stops) {
+    stops.forEach(s => {
+      const baseId = s.stop_id.endsWith('P') ? s.stop_id.slice(0, -1) : s.stop_id;
+      const shared = {
+        name: s.stop_name,
+        distance: distanceMap[baseId],
+      };
+      stopDataMap[baseId] = shared;
+      stopDataMap[baseId + 'P'] = shared;
+    });
+  }
+
+  const widget = new ListWidget();
+  widget.backgroundColor = COLORS.background;
+  widget.setPadding(12, 16, 12, 16);
+
+  // Handle widget parameters for refresh
+  if (config.runsInWidget && args.widgetParameter) {
+    const minutes = parseInt(args.widgetParameter);
+    if (!isNaN(minutes) && minutes > 0) {
+      widget.refreshAfterDate = new Date(Date.now() + (minutes * 60 * 1000));
+    }
+  }
+
+  widget.addSpacer(2);
+
+  // Deduplicate trips by closest physical stop
+  const getDist = (stopId) => {
+    const baseId = stopId.endsWith('P') ? stopId.slice(0, -1) : stopId;
+    const d = distanceMap[baseId];
+    return typeof d === "number" ? d : Infinity;
+  };
+
+  const uniqueByTrip = new Map();
+  for (const dep of departures) {
+    const tId = dep.trip.id;
+    const curr = uniqueByTrip.get(tId);
+    if (!curr || getDist(dep.stop.id) < getDist(curr.stop.id)) {
+      uniqueByTrip.set(tId, dep);
+    }
+  }
+  const dedup = Array.from(uniqueByTrip.values());
+
+  // Timetable grouped by route|canonical platform (ensureP)
+  const timetable = {};
+  for (const dep of dedup) {
+    const platformKey = ensureP(dep.stop.id);
+    const key = `${dep.route.short_name}|${platformKey}`;
+    if (!timetable[key]) timetable[key] = [];
+    timetable[key].push({
+      time: new Date(dep.departure_timestamp.predicted || dep.departure_timestamp.scheduled),
+      isAC: dep.trip.is_air_conditioned,
+    });
+  }
+  Object.keys(timetable).forEach(k => timetable[k].sort((a, b) => a.time - b.time));
+
+  // Catchability
+  const now = new Date();
+  const catchable = dedup.filter(dep => {
+    const baseId = (ensureP(dep.stop.id)).slice(0, -1);
+    const distance = distanceMap[baseId];
+    if (typeof distance !== "number") return true;
+
+    const predicted = new Date(dep.departure_timestamp.predicted || dep.departure_timestamp.scheduled);
+    const secondsUntil = (predicted - now) / 1000;
+    const walking = distance / AVERAGE_WALKING_SPEED_MPS;
+
+    let required = (distance < IGNORE_WALKING_TIME_ROUNDING_UNDER_METERS)
+      ? walking
+      : Math.ceil(walking / 60) * 60;
+
+    const buffer = (dep.route.type === 1)
+      ? WALKING_TIME_BUFFER_MINUTES_METRO * 60
+      : WALKING_TIME_BUFFER_MINUTES_DEFAULT * 60;
+
+    required += buffer;
+    return secondsUntil >= required;
+  });
+
+  // Order globally
+  const stream = catchable
+    .map(dep => ({
+      dep,
+      stopIdP: ensureP(dep.stop.id), // canonical platform key
+      predicted: new Date(dep.departure_timestamp.predicted || dep.departure_timestamp.scheduled),
+    }))
+    .sort((a, b) => {
+      const dt = a.predicted - b.predicted;
+      if (dt !== 0) return dt;
+      const da = getDist(a.stopIdP);
+      const db = getDist(b.stopIdP);
+      if (da !== db) return da - db;
+      if (a.dep.route.short_name !== b.dep.route.short_name) {
+        return a.dep.route.short_name.localeCompare(b.dep.route.short_name);
+      }
+      return 0;
     });
 
-    const fetchedStopData = await Promise.all(stopDataPromises);
-    const stopAData = fetchedStopData[0] || { departures: [], stopName: "Stop 1 N/A", success: false };
-    const stopBData = fetchedStopData[1] || { departures: [], stopName: "Stop 2 N/A", success: false };
+  // Dynamic rows based on platforms present
+  const MAX_PREVIEW_ROWS = 12;
+  let previewRows = stream.slice(0, MAX_PREVIEW_ROWS);
 
-    // Visual Parameters below are kept as is from your file
-    const headerStack = widget.addStack();
-    headerStack.layoutHorizontally();
-    headerStack.centerAlignContent();
-    const stopNameContainerWidth = 105;
+  const previewBuckets = new Map();
+  for (const it of previewRows) {
+    if (!previewBuckets.has(it.stopIdP)) previewBuckets.set(it.stopIdP, []);
+    previewBuckets.get(it.stopIdP).push(it);
+  }
+  const platformCount = previewBuckets.size;
 
-    const stopAOuterContainer = headerStack.addStack();
-    stopAOuterContainer.size = new Size(stopNameContainerWidth, 0);
-    stopAOuterContainer.layoutVertically();
-    const stopAText = stopAOuterContainer.addText(stopAData.stopName);
-    stopAText.font = Font.boldSystemFont(12);
-    stopAText.textColor = TEXT_BLACK;
-    stopAText.lineLimit = 2;
-    stopAText.minimumScaleFactor = 0.7;
-    stopAText.leftAlignText();
-    headerStack.addSpacer();
+  let TOTAL_ROWS;
+  if (platformCount == 1) TOTAL_ROWS = 11;
+  else if (platformCount == 2) TOTAL_ROWS = 10;
+  else if (platformCount == 3) TOTAL_ROWS = 9;
+  else if (platformCount == 4) TOTAL_ROWS = 8;
+  else TOTAL_ROWS = 7;
 
-    try {
-        const logoReq = new Request(LOGO_URL);
-        const logoImg = await logoReq.loadImage();
-        const logo = headerStack.addImage(logoImg);
-        logo.imageSize = new Size(36, 24);
-        logo.cornerRadius = 3;
-        logo.centerAlignImage();
-    } catch (e) {
-        const logoTextFallback = headerStack.addText("PID");
-        logoTextFallback.font = Font.boldSystemFont(14);
-        logoTextFallback.textColor = AC_BLUE;
-        logoTextFallback.centerAlignText();
-    }
-    headerStack.addSpacer();
+  const picked = stream.slice(0, TOTAL_ROWS);
 
-    const stopBOuterContainer = headerStack.addStack();
-    stopBOuterContainer.size = new Size(stopNameContainerWidth, 0);
-    stopBOuterContainer.layoutVertically();
-    const stopBInnerStack = stopBOuterContainer.addStack();
-    stopBInnerStack.layoutHorizontally();
-    stopBInnerStack.addSpacer();
-    const stopBText = stopBInnerStack.addText(stopBData.stopName);
-    stopBText.font = Font.boldSystemFont(12);
-    stopBText.textColor = TEXT_BLACK;
-    stopBText.lineLimit = 2;
-    stopBText.minimumScaleFactor = 0.7;
+  // Consolidate strictly by canonical platform to avoid split headers
+  const buckets = new Map();
+  for (const it of picked) {
+    if (!buckets.has(it.stopIdP)) buckets.set(it.stopIdP, []);
+    buckets.get(it.stopIdP).push(it);
+  }
 
-    widget.addSpacer(6);
+  // Order platforms by earliest selected time
+  const platformOrder = Array.from(buckets.entries())
+    .map(([stopIdP, arr]) => ({ stopIdP, earliest: arr[0].predicted }))
+    .sort((a, b) => a.earliest - b.earliest)
+    .map(x => x.stopIdP); // Removed slice(0, MAX_PLATFORM) to handle medium widget filtering manually
 
-    const mainStack = widget.addStack();
-    mainStack.layoutHorizontally();
-    mainStack.topAlignContent();
-    createDepartureColumnMediumWidget(mainStack, stopAData, 0);
-    mainStack.addSpacer(6);
-    const divider = mainStack.addStack();
-    divider.size = new Size(2, 95);
-    divider.backgroundColor = RED_TIME;
-    mainStack.addSpacer(6);
-    createDepartureColumnMediumWidget(mainStack, stopBData, 1);
+  // Render
+  if (platformOrder.length === 0) {
     widget.addSpacer();
+    const label = widget.addText("No catchable departures found.");
+    label.font = Font.mediumSystemFont(12);
+    label.textColor = COLORS.textSecondary;
+    label.centerAlignText();
+    widget.addSpacer();
+  } else {
+    // --- LAYOUT LOGIC FOR MEDIUM VS LARGE ---
+    if (config.widgetFamily === "medium") {
+      // Medium Widget: 2 columns side-by-side
+      const hStack = widget.addStack();
+      hStack.layoutHorizontally();
 
-    const bottomStack = widget.addStack();
-    bottomStack.layoutHorizontally();
-    bottomStack.addSpacer();
-    const now_footer = new Date();
-    const timeStr = `${now_footer.getHours().toString().padStart(2, '0')}:${now_footer.getMinutes().toString().padStart(2, '0')}`;
-    const updateText = bottomStack.addText(`Updated: ${timeStr}`);
-    updateText.font = Font.systemFont(8);
-    updateText.textColor = GRAY_TEXT;
-    updateText.textOpacity = 0.8;
-    bottomStack.addSpacer();
-    return widget;
-}
+      const leftStack = hStack.addStack();
+      leftStack.layoutVertically();
 
-// ==========================================================================================
-// --- MAIN SCRIPT EXECUTION LOGIC ---
-// ==========================================================================================
-async function run() {
-    let widgetToPresent;
+      hStack.addSpacer(12);
 
-    if (config.widgetFamily === 'large') {
-        widgetToPresent = await createLargeWidget();
-    } else if (config.widgetFamily === 'medium') {
-        widgetToPresent = await createMediumWidget();
-    } else {
-        widgetToPresent = new ListWidget();
-        const text = widgetToPresent.addText("Configure widget size (Large or Medium).");
-        text.font = Font.systemFont(12);
-        text.centerAlignText();
-    }
+      const rightStack = hStack.addStack();
+      rightStack.layoutVertically();
 
-    if (config.runsInWidget) {
-        Script.setWidget(widgetToPresent);
-    } else {
-        // In-app presentation
-        if (widgetToPresent && widgetToPresent.allTexts && widgetToPresent.allTexts.length > 0 && widgetToPresent.allTexts[0].text.includes("Configure widget size")) {
-            await widgetToPresent.presentSmall();
-        } else if (widgetToPresent) {
-            // Attempt to present appropriately; defaults to medium if specific test widget wasn't explicitly large.
-            // Simplified presentation for in-app based on what `widgetToPresent` is
-            try {
-                if (widgetToPresent.allStacks.some(s => s.size && s.size.width === 500)) { // Heuristic for large widget's divider
-                    await widgetToPresent.presentLarge();
-                } else {
-                    await widgetToPresent.presentMedium();
-                }
-            } catch (e) {
-                console.warn("Could not determine best in-app presentation size, defaulting to small/medium. Error: " + e);
-                await widgetToPresent.presentSmall(); // Fallback
-            }
-        } else {
-            // Fallback if widgetToPresent is undefined
-            let fallbackWidget = new ListWidget();
-            fallbackWidget.addText("Error: Widget not created.");
-            await fallbackWidget.presentSmall();
+      const platformsToShow = platformOrder.slice(0, 2); // Max 2 platforms
+
+      platformsToShow.forEach((stopIdP, index) => {
+        const stack = index === 0 ? leftStack : rightStack;
+        const arr = buckets.get(stopIdP) || [];
+        // Limit to 3 departures per platform for medium view
+        const departuresToShow = arr.slice(0, 3);
+
+        renderPlatformBlock(stack, stopIdP, departuresToShow, stopDataMap, timetable, now, true);
+        if (index === 0 && platformsToShow.length === 1) {
+            // If only 1 platform, leave right side empty (spacer handles it)
         }
+      });
+
+    } else {
+      // Large Widget (default behavior)
+      const platformsToShow = platformOrder.slice(0, MAX_PLATFORM);
+      let emitted = 0;
+
+      for (const stopIdP of platformsToShow) {
+        if (emitted >= TOTAL_ROWS) break;
+        const arr = buckets.get(stopIdP) || [];
+
+        // Render manually to track 'emitted' rows count for dynamic height
+        // (We reuse the same helper function but passing false for simplification)
+        renderPlatformBlock(widget, stopIdP, arr, stopDataMap, timetable, now, false);
+
+        emitted += 1; // Count header
+        emitted += arr.length; // Count rows
+
+        widget.addSpacer(2);
+      }
     }
-    Script.complete();
+  }
+
+  // Footer
+  const footer = widget.addStack();
+  footer.layoutHorizontally();
+  footer.centerAlignContent();
+
+  const leftF = footer.addStack();
+  leftF.centerAlignContent();
+  // Logo removed
+  footer.addSpacer();
+  footer.addSpacer();
+
+  const rightF = footer.addStack();
+  rightF.layoutHorizontally();
+  rightF.centerAlignContent();
+
+  if (typeof gpsAccuracy === "number" && isFinite(gpsAccuracy)) {
+    const acc = rightF.addText(`GPS: ±${Math.round(gpsAccuracy)}m`);
+    acc.font = Font.systemFont(9);
+    acc.textColor = COLORS.textSecondary;
+    acc.textOpacity = 0.8;
+    rightF.addSpacer(6);
+  }
+
+  const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const ver = rightF.addText(`• v${WIDGET_VERSION} • ${ts}`);
+  ver.font = Font.systemFont(9);
+  ver.textColor = COLORS.textSecondary;
+  ver.textOpacity = 0.8;
+
+  return widget;
 }
 
-// --- ERROR HANDLING ---
-run().catch(err => {
-    console.error(`Unhandled Script Error: ${err}\nStack: ${err.stack}`);
-    if (config.runsInWidget) {
-        let errorWidget = new ListWidget();
-        // User-friendly error in widget
-        errorWidget.addText("Widget Error");
-        errorWidget.addText("Check Scriptable logs.");
-        errorWidget.textColor = Color.dynamic(Color.black(), Color.white());
-        errorWidget.backgroundColor = Color.dynamic(new Color("#FFD2D2"), new Color("#580000")); // Light/Dark Red
-        Script.setWidget(errorWidget);
-    } else {
-        let errorWidget = new ListWidget();
-        errorWidget.addText(`Script Error: ${err}`);
-        errorWidget.presentSmall();
-    }
-    Script.complete();
-});
+// Helper to render a platform block (header + departures)
+function renderPlatformBlock(widget, stopIdP, arr, stopDataMap, timetable, now, isSimplified) {
+  const baseId = stopIdP.slice(0, -1);
+  const info = stopDataMap[baseId] || stopDataMap[stopIdP] || {};
+  const stopName = info.name || (arr[0]?.dep?.stop?.name) || "";
+  const platformCode = (arr[0]?.dep?.stop?.platform_code) || "";
+
+  renderHeader(widget, stopName, platformCode, info.distance);
+  widget.addSpacer(5);
+
+  for (const it of arr) {
+    renderDepartureRow(widget, it.dep, timetable, now, isSimplified);
+    widget.addSpacer(4);
+  }
+}
+
+function renderHeader(widget, stopName, platformCode, distance) {
+  const walkingSeconds = typeof distance === "number" ? (distance / AVERAGE_WALKING_SPEED_MPS) : 0;
+  let walkLabel;
+  if (typeof distance === "number" && distance < 30) {
+    walkLabel = "• nearby";
+  } else {
+    const roundedWalking = (typeof distance === "number" && distance >= IGNORE_WALKING_TIME_ROUNDING_UNDER_METERS)
+      ? Math.ceil(walkingSeconds / 60)
+      : Math.max(1, Math.round(walkingSeconds / 60));
+    walkLabel = `• ${roundedWalking} min walk`;
+  }
+
+  const header = widget.addStack();
+  header.layoutHorizontally();
+  header.centerAlignContent();
+
+  const left = header.addStack();
+  const headerTitle = left.addText(platformCode ? `${stopName} — ${platformCode}` : `${stopName}`);
+  headerTitle.font = Font.boldSystemFont(14);
+  headerTitle.textColor = COLORS.textPrimary;
+  headerTitle.lineLimit = 1;
+
+  header.addSpacer(6);
+
+  const walk = header.addText(walkLabel);
+  walk.font = Font.systemFont(10);
+  walk.textColor = COLORS.textSecondary;
+}
+
+function renderDepartureRow(widget, dep, timetable, now, isSimplified) {
+  const row = widget.addStack();
+  row.layoutHorizontally();
+  row.centerAlignContent();
+  row.spacing = 8;
+
+  // Badge
+  const badgeWrap = row.addStack();
+  const badge = badgeWrap.addStack();
+  badge.size = new Size(52, 0);
+  badge.centerAlignContent();
+  badge.setPadding(2, 6, 2, 6);
+  badge.backgroundColor = getBadgeBackgroundColor(dep);
+  badge.cornerRadius = 10;
+
+  const lineText = badge.addText(dep.route.short_name);
+  lineText.font = Font.heavySystemFont(14);
+  lineText.textColor = Color.white();
+  lineText.lineLimit = 1;
+
+  // Slim divider
+  const divider = row.addStack();
+  divider.backgroundColor = COLORS.imminent;
+  divider.size = new Size(1.5, 22);
+  divider.cornerRadius = 1;
+
+  // Middle
+  const mid = row.addStack();
+  mid.layoutHorizontally();
+  mid.centerAlignContent();
+  mid.spacing = 6;
+
+  const headsign = mid.addText(dep.trip.headsign || "");
+  headsign.font = Font.semiboldSystemFont(13);
+  headsign.textColor = COLORS.textPrimary;
+  headsign.lineLimit = 1;
+
+  const predicted = new Date(dep.departure_timestamp.predicted || dep.departure_timestamp.scheduled);
+
+  // Indicators (Delayed, AC, Wheelchair, Next Arrival)
+  // Only show if NOT simplified (Large widget only)
+  if (!isSimplified) {
+      const ind = mid.addStack();
+      ind.layoutHorizontally();
+      ind.centerAlignContent();
+      ind.spacing = 4;
+
+      const scheduled = dep.departure_timestamp.scheduled ? new Date(dep.departure_timestamp.scheduled) : null;
+      let isDelayed = false;
+      let delayMinutes = 0;
+      if (scheduled) {
+        const delaySeconds = Math.max(0, (predicted - scheduled) / 1000);
+        isDelayed = delaySeconds > 59;
+        delayMinutes = Math.round(delaySeconds / 60);
+      }
+      if (isDelayed && delayMinutes > 0) {
+        const dc = ind.addText(`+${delayMinutes}`);
+        dc.font = Font.systemFont(10);
+        dc.textColor = COLORS.delayed;
+      }
+
+      if (dep.trip.is_wheelchair_accessible) {
+        const w = ind.addText("♿︎");
+        w.font = Font.systemFont(14);
+        w.textColor = COLORS.wheelchairBlue;
+      }
+      if (dep.trip.is_air_conditioned) {
+        const a = ind.addText("❄︎");
+        a.font = Font.systemFont(12);
+        a.textColor = COLORS.acBlue;
+      }
+
+      ind.addSpacer(0);
+
+      if (SHOW_NEXT_ARRIVAL_INFO) {
+        const key = `${dep.route.short_name}|${ensureP(dep.stop.id)}`;
+        const arrs = timetable[key] || [];
+        const idx = arrs.findIndex(t => t.time.getTime() === predicted.getTime());
+        if (idx > -1 && idx < arrs.length - 1) {
+          const next = arrs[idx + 1];
+          const nextMinutes = Math.floor((next.time - now) / 60000);
+          let teaser;
+          if (nextMinutes > 10) {
+            const hh = next.time.getHours().toString().padStart(2, '0');
+            const mm = next.time.getMinutes().toString().padStart(2, '0');
+            teaser = `➜ ${hh}:${mm}`;
+          } else {
+            teaser = `➜ ${nextMinutes} min`;
+          }
+          const nextLabel = ind.addText(teaser);
+          nextLabel.font = Font.systemFont(10);
+          nextLabel.textColor = COLORS.textSecondary;
+          nextLabel.textOpacity = 0.5;
+        }
+      }
+  }
+
+  row.addSpacer();
+
+  const minutesUntil = Math.floor((predicted - now) / 60000);
+  const right = row.addStack();
+  right.layoutHorizontally();
+  right.centerAlignContent();
+  right.spacing = 4;
+
+  // Recalculate delay status for color logic (repeated since it was inside if block above)
+  const scheduled = dep.departure_timestamp.scheduled ? new Date(dep.departure_timestamp.scheduled) : null;
+  let isDelayed = false;
+  if (scheduled) {
+    const delaySeconds = Math.max(0, (predicted - scheduled) / 1000);
+    isDelayed = delaySeconds > 59;
+  }
+
+  const timeColor = (minutesUntil <= 2) ? COLORS.imminent : (isDelayed ? COLORS.delayed : COLORS.onTime);
+  const timeLabel = right.addText(minutesUntil > 10 ? fmtClock(predicted) : `${minutesUntil}`);
+  timeLabel.font = Font.boldSystemFont(16);
+  timeLabel.textColor = timeColor;
+  timeLabel.rightAlignText();
+}
+
+//////////////////////////////
+// --- UTILS ---
+//////////////////////////////
+function ensureP(id) {
+  return id.endsWith('P') ? id : id + 'P';
+}
+
+function fmtClock(d) {
+  const hh = d.getHours().toString().padStart(2, '0');
+  const mm = d.getMinutes().toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+async function loadImage(url) {
+  const req = new Request(url);
+  return await req.loadImage();
+}
+
+function createErrorWidget(title, message) {
+  const widget = new ListWidget();
+  widget.backgroundColor = COLORS.background;
+  widget.setPadding(16, 16, 16, 16);
+
+  const t = widget.addText(title);
+  t.textColor = COLORS.imminent;
+  t.font = Font.boldSystemFont(16);
+
+  widget.addSpacer(4);
+
+  const m = widget.addText(message);
+  m.textColor = COLORS.textSecondary;
+  m.font = Font.systemFont(14);
+
+  widget.addSpacer();
+
+  const footer = widget.addStack();
+  footer.layoutHorizontally();
+  footer.centerAlignContent();
+
+  const left = footer.addStack();
+  footer.addSpacer();
+
+  const ver = footer.addText(`v${WIDGET_VERSION}`);
+  ver.font = Font.systemFont(9);
+  ver.textColor = COLORS.textSecondary;
+  ver.textOpacity = 0.8;
+
+  return widget;
+}
