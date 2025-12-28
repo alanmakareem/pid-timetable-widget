@@ -22,7 +22,7 @@ const MAX_PLATFORM = 5;
 const SHOW_NEXT_ARRIVAL_INFO = false;
 const DATABASE_FILENAME = "pid_stops_db.json";
 const SORT_BY_CLOSEST_STOP_ONLY = false;
-const WIDGET_VERSION = "5.3.4";
+const WIDGET_VERSION = "5.4.5";
 
 // Walking-time
 const AVERAGE_WALKING_SPEED_MPS = 1.3;
@@ -229,6 +229,15 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
   const widget = new ListWidget();
   widget.backgroundColor = COLORS.background;
   widget.setPadding(12, 16, 12, 16);
+
+  // Handle widget parameters for refresh
+  if (config.runsInWidget && args.widgetParameter) {
+    const minutes = parseInt(args.widgetParameter);
+    if (!isNaN(minutes) && minutes > 0) {
+      widget.refreshAfterDate = new Date(Date.now() + (minutes * 60 * 1000));
+    }
+  }
+
   widget.addSpacer(2);
 
   // Deduplicate trips by closest physical stop
@@ -334,12 +343,9 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
   const platformOrder = Array.from(buckets.entries())
     .map(([stopIdP, arr]) => ({ stopIdP, earliest: arr[0].predicted }))
     .sort((a, b) => a.earliest - b.earliest)
-    .slice(0, MAX_PLATFORM)
     .map(x => x.stopIdP);
 
   // Render
-  widget.addSpacer()
-  let emitted = 0;
   if (platformOrder.length === 0) {
     widget.addSpacer();
     const label = widget.addText("No catchable departures found.");
@@ -348,53 +354,60 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
     label.centerAlignText();
     widget.addSpacer();
   } else {
-    for (const stopIdP of platformOrder) {
-      if (emitted >= TOTAL_ROWS) break;
+    if (config.widgetFamily === "medium") {
+      // Medium Widget: 2 columns side-by-side
+      const hStack = widget.addStack();
+      hStack.layoutHorizontally();
 
-      const baseId = stopIdP.slice(0, -1);
-      const arr = buckets.get(stopIdP) || [];
-      const info = stopDataMap[baseId] || stopDataMap[stopIdP] || {};
-      const stopName = info.name || (arr[0]?.dep?.stop?.name) || "";
-      const platformCode = (arr[0]?.dep?.stop?.platform_code) || "";
+      const leftStack = hStack.addStack();
+      leftStack.layoutVertically();
 
-      // Header: base stop name — platform
-      const distance = info.distance;
-      const walkingSeconds = typeof distance === "number" ? (distance / AVERAGE_WALKING_SPEED_MPS) : 0;
-      let walkLabel;
-      if (typeof distance === "number" && distance < 30) {
-        walkLabel = "• nearby";
-      } else {
-        const roundedWalking = (typeof distance === "number" && distance >= IGNORE_WALKING_TIME_ROUNDING_UNDER_METERS)
-          ? Math.ceil(walkingSeconds / 60)
-          : Math.max(1, Math.round(walkingSeconds / 60));
-        walkLabel = `• ${roundedWalking} min walk`;
-      }
+      hStack.addSpacer(12);
 
-      const header = widget.addStack();
-      header.layoutHorizontally();
-      header.centerAlignContent();
+      const rightStack = hStack.addStack();
+      rightStack.layoutVertically();
 
-      const left = header.addStack();
-      const headerTitle = left.addText(platformCode ? `${stopName} — ${platformCode}` : `${stopName}`);
-      headerTitle.font = Font.boldSystemFont(14);
-      headerTitle.textColor = COLORS.textPrimary;
-      headerTitle.lineLimit = 1;
+      const platformsToShow = platformOrder.slice(0, 2); // Max 2 platforms
 
-      header.addSpacer(6);
+      platformsToShow.forEach((stopIdP, index) => {
+        const stack = index === 0 ? leftStack : rightStack;
+        const arr = buckets.get(stopIdP) || [];
+        // Limit to 3 departures per platform for medium view
+        const departuresToShow = arr.slice(0, 3);
 
-      const walk = header.addText(walkLabel);
-      walk.font = Font.systemFont(10);
-      walk.textColor = COLORS.textSecondary;
-  
-    widget.addSpacer(5)
+        renderPlatformBlock(stack, stopIdP, departuresToShow, stopDataMap, timetable, now, true);
+        if (index === 0 && platformsToShow.length === 1) {
+            // If only 1 platform, leave right side empty (spacer handles it)
+        }
+      });
 
-      for (const it of arr) {
+    } else {
+      // Large Widget (default behavior)
+      widget.addSpacer(2);
+      const platformsToShow = platformOrder.slice(0, MAX_PLATFORM);
+      let emitted = 0;
+
+      for (const stopIdP of platformsToShow) {
         if (emitted >= TOTAL_ROWS) break;
-        renderDepartureRow(widget, it.dep, timetable, now);
-        emitted += 1;
-        widget.addSpacer(4);
+        const arr = buckets.get(stopIdP) || [];
+
+        // Render manually to track 'emitted' rows count for dynamic height
+        const baseId = stopIdP.slice(0, -1);
+        const info = stopDataMap[baseId] || stopDataMap[stopIdP] || {};
+        const stopName = info.name || (arr[0]?.dep?.stop?.name) || "";
+        const platformCode = (arr[0]?.dep?.stop?.platform_code) || "";
+
+        renderHeader(widget, stopName, platformCode, info.distance);
+        widget.addSpacer(5);
+
+        for (const it of arr) {
+            if (emitted >= TOTAL_ROWS) break;
+            renderDepartureRow(widget, it.dep, timetable, now, false);
+            emitted += 1;
+            widget.addSpacer(4);
+        }
+        widget.addSpacer(2);
       }
-      widget.addSpacer(2)
     }
   }
 
@@ -430,7 +443,51 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
   return widget;
 }
 
-function renderDepartureRow(widget, dep, timetable, now) {
+function renderPlatformBlock(widget, stopIdP, arr, stopDataMap, timetable, now, isSimplified) {
+  const baseId = stopIdP.slice(0, -1);
+  const info = stopDataMap[baseId] || stopDataMap[stopIdP] || {};
+  const stopName = info.name || (arr[0]?.dep?.stop?.name) || "";
+  const platformCode = (arr[0]?.dep?.stop?.platform_code) || "";
+
+  renderHeader(widget, stopName, platformCode, info.distance);
+  widget.addSpacer(5);
+
+  for (const it of arr) {
+    renderDepartureRow(widget, it.dep, timetable, now, isSimplified);
+    widget.addSpacer(4);
+  }
+}
+
+function renderHeader(widget, stopName, platformCode, distance) {
+  const walkingSeconds = typeof distance === "number" ? (distance / AVERAGE_WALKING_SPEED_MPS) : 0;
+  let walkLabel;
+  if (typeof distance === "number" && distance < 30) {
+    walkLabel = "• nearby";
+  } else {
+    const roundedWalking = (typeof distance === "number" && distance >= IGNORE_WALKING_TIME_ROUNDING_UNDER_METERS)
+      ? Math.ceil(walkingSeconds / 60)
+      : Math.max(1, Math.round(walkingSeconds / 60));
+    walkLabel = `• ${roundedWalking} min walk`;
+  }
+
+  const header = widget.addStack();
+  header.layoutHorizontally();
+  header.centerAlignContent();
+
+  const left = header.addStack();
+  const headerTitle = left.addText(platformCode ? `${stopName} — ${platformCode}` : `${stopName}`);
+  headerTitle.font = Font.boldSystemFont(14);
+  headerTitle.textColor = COLORS.textPrimary;
+  headerTitle.lineLimit = 1;
+
+  header.addSpacer(6);
+
+  const walk = header.addText(walkLabel);
+  walk.font = Font.systemFont(10);
+  walk.textColor = COLORS.textSecondary;
+}
+
+function renderDepartureRow(widget, dep, timetable, now, isSimplified) {
   const row = widget.addStack();
   row.layoutHorizontally();
   row.centerAlignContent();
@@ -467,59 +524,64 @@ function renderDepartureRow(widget, dep, timetable, now) {
   headsign.textColor = COLORS.textPrimary;
   headsign.lineLimit = 1;
 
-  const ind = mid.addStack();
-  ind.layoutHorizontally();
-  ind.centerAlignContent();
-  ind.spacing = 4;
-
   const predicted = new Date(dep.departure_timestamp.predicted || dep.departure_timestamp.scheduled);
-  const scheduled = dep.departure_timestamp.scheduled ? new Date(dep.departure_timestamp.scheduled) : null;
-  let isDelayed = false;
-  let delayMinutes = 0;
-  if (scheduled) {
-    const delaySeconds = Math.max(0, (predicted - scheduled) / 1000);
-    isDelayed = delaySeconds > 59;
-    delayMinutes = Math.round(delaySeconds / 60);
-  }
-  if (isDelayed && delayMinutes > 0) {
-    const dc = ind.addText(`+${delayMinutes}`);
-    dc.font = Font.systemFont(10);
-    dc.textColor = COLORS.delayed;
-  }
 
-  if (dep.trip.is_wheelchair_accessible) {
-    const w = ind.addText("♿︎");
-    w.font = Font.systemFont(14);
-    w.textColor = COLORS.wheelchairBlue;
-  }
-  if (dep.trip.is_air_conditioned) {
-    const a = ind.addText("❄︎");
-    a.font = Font.systemFont(12);
-    a.textColor = COLORS.acBlue;
-  }
+  // Indicators (Delayed, AC, Wheelchair, Next Arrival)
+  // Only show if NOT simplified (Large widget only)
+  if (!isSimplified) {
+      const ind = mid.addStack();
+      ind.layoutHorizontally();
+      ind.centerAlignContent();
+      ind.spacing = 4;
 
-  ind.addSpacer(0);
-
-  if (SHOW_NEXT_ARRIVAL_INFO) {
-    const key = `${dep.route.short_name}|${ensureP(dep.stop.id)}`;
-    const arrs = timetable[key] || [];
-    const idx = arrs.findIndex(t => t.time.getTime() === predicted.getTime());
-    if (idx > -1 && idx < arrs.length - 1) {
-      const next = arrs[idx + 1];
-      const nextMinutes = Math.floor((next.time - now) / 60000);
-      let teaser;
-      if (nextMinutes > 10) {
-        const hh = next.time.getHours().toString().padStart(2, '0');
-        const mm = next.time.getMinutes().toString().padStart(2, '0');
-        teaser = `➜ ${hh}:${mm}`;
-      } else {
-        teaser = `➜ ${nextMinutes} min`;
+      const scheduled = dep.departure_timestamp.scheduled ? new Date(dep.departure_timestamp.scheduled) : null;
+      let isDelayed = false;
+      let delayMinutes = 0;
+      if (scheduled) {
+        const delaySeconds = Math.max(0, (predicted - scheduled) / 1000);
+        isDelayed = delaySeconds > 59;
+        delayMinutes = Math.round(delaySeconds / 60);
       }
-      const nextLabel = ind.addText(teaser);
-      nextLabel.font = Font.systemFont(10);
-      nextLabel.textColor = COLORS.textSecondary;
-      nextLabel.textOpacity = 0.5;
-    }
+      if (isDelayed && delayMinutes > 0) {
+        const dc = ind.addText(`+${delayMinutes}`);
+        dc.font = Font.systemFont(10);
+        dc.textColor = COLORS.delayed;
+      }
+
+      if (dep.trip.is_wheelchair_accessible) {
+        const w = ind.addText("♿︎");
+        w.font = Font.systemFont(14);
+        w.textColor = COLORS.wheelchairBlue;
+      }
+      if (dep.trip.is_air_conditioned) {
+        const a = ind.addText("❄︎");
+        a.font = Font.systemFont(12);
+        a.textColor = COLORS.acBlue;
+      }
+
+      ind.addSpacer(0);
+
+      if (SHOW_NEXT_ARRIVAL_INFO) {
+        const key = `${dep.route.short_name}|${ensureP(dep.stop.id)}`;
+        const arrs = timetable[key] || [];
+        const idx = arrs.findIndex(t => t.time.getTime() === predicted.getTime());
+        if (idx > -1 && idx < arrs.length - 1) {
+          const next = arrs[idx + 1];
+          const nextMinutes = Math.floor((next.time - now) / 60000);
+          let teaser;
+          if (nextMinutes > 10) {
+            const hh = next.time.getHours().toString().padStart(2, '0');
+            const mm = next.time.getMinutes().toString().padStart(2, '0');
+            teaser = `➜ ${hh}:${mm}`;
+          } else {
+            teaser = `➜ ${nextMinutes} min`;
+          }
+          const nextLabel = ind.addText(teaser);
+          nextLabel.font = Font.systemFont(10);
+          nextLabel.textColor = COLORS.textSecondary;
+          nextLabel.textOpacity = 0.5;
+        }
+      }
   }
 
   row.addSpacer();
@@ -529,6 +591,14 @@ function renderDepartureRow(widget, dep, timetable, now) {
   right.layoutHorizontally();
   right.centerAlignContent();
   right.spacing = 4;
+
+  // Recalculate delay status for color logic (repeated since it was inside if block above)
+  const scheduled = dep.departure_timestamp.scheduled ? new Date(dep.departure_timestamp.scheduled) : null;
+  let isDelayed = false;
+  if (scheduled) {
+    const delaySeconds = Math.max(0, (predicted - scheduled) / 1000);
+    isDelayed = delaySeconds > 59;
+  }
 
   const timeColor = (minutesUntil <= 2) ? COLORS.imminent : (isDelayed ? COLORS.delayed : COLORS.onTime);
   const timeLabel = right.addText(minutesUntil > 10 ? fmtClock(predicted) : `${minutesUntil}`);
