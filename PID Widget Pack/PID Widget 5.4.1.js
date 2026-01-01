@@ -122,7 +122,7 @@ function finalize(widget) {
 //////////////////////////////
 function getStopDatabase() {
   if (stopDatabaseCache) return stopDatabaseCache;
-  const fm = FileManager.local();
+  const fm = FileManager.iCloud();
   const path = fm.joinPath(fm.documentsDirectory(), DATABASE_FILENAME);
   if (!fm.fileExists(path)) {
     throw new Error(`Database '${DATABASE_FILENAME}' not found.`);
