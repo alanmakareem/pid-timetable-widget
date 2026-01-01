@@ -362,10 +362,15 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
     buckets.get(it.stopIdP).push(it);
   }
 
-  // Order platforms by earliest selected time
+  // Order platforms by distance (closest to furthest)
   const platformOrder = Array.from(buckets.entries())
-    .map(([stopIdP, arr]) => ({ stopIdP, earliest: arr[0].predicted }))
-    .sort((a, b) => a.earliest - b.earliest)
+    .map(([stopIdP, arr]) => {
+      const baseId = stopIdP.slice(0, -1);
+      const info = stopDataMap[baseId] || stopDataMap[stopIdP] || {};
+      const dist = (typeof info.distance === "number") ? info.distance : Infinity;
+      return { stopIdP, dist };
+    })
+    .sort((a, b) => a.dist - b.dist)
     .map(x => x.stopIdP); // Removed slice(0, MAX_PLATFORM) to handle medium widget filtering manually
 
   // Render
