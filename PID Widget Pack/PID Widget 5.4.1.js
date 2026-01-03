@@ -508,7 +508,7 @@ function renderHeader(widget, stopName, platformCode, distance) {
 
   const left = header.addStack();
   const headerTitle = left.addText(platformCode ? `${stopName} — ${platformCode}` : `${stopName}`);
-  headerTitle.font = Font.boldSystemFont(14);
+  headerTitle.font = Font.boldSystemFont(13);
   headerTitle.textColor = COLORS.textPrimary;
   headerTitle.lineLimit = 1;
 
@@ -535,7 +535,7 @@ function renderDepartureRow(widget, dep, timetable, now, isSimplified) {
   badge.cornerRadius = 10;
 
   const lineText = badge.addText(dep.route.short_name);
-  lineText.font = Font.heavySystemFont(14);
+  lineText.font = Font.heavySystemFont(13);
   lineText.textColor = Color.white();
   lineText.lineLimit = 1;
 
