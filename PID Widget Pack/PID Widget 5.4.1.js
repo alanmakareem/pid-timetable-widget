@@ -411,21 +411,32 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
       });
 
     } else {
-      // Large Widget (default behavior)
+      // Large Widget (default behavior) - Mimic 5.3.4 density
       const platformsToShow = platformOrder.slice(0, MAX_PLATFORM);
       let emitted = 0;
 
+      widget.addSpacer();
+
       for (const stopIdP of platformsToShow) {
         if (emitted >= TOTAL_ROWS) break;
+
         const arr = buckets.get(stopIdP) || [];
+        const baseId = stopIdP.slice(0, -1);
+        const info = stopDataMap[baseId] || stopDataMap[stopIdP] || {};
+        const stopName = info.name || (arr[0]?.dep?.stop?.name) || "";
+        const platformCode = (arr[0]?.dep?.stop?.platform_code) || "";
 
-        // Render manually to track 'emitted' rows count for dynamic height
-        // (We reuse the same helper function but passing false for simplification)
-        renderPlatformBlock(widget, stopIdP, arr, stopDataMap, timetable, now, false);
+        // Render Header
+        renderHeader(widget, stopName, platformCode, info.distance);
+        widget.addSpacer(5);
 
-        emitted += 1; // Count header
-        emitted += arr.length; // Count rows
-
+        // Render Departures
+        for (const it of arr) {
+            if (emitted >= TOTAL_ROWS) break;
+            renderDepartureRow(widget, it.dep, timetable, now, false);
+            emitted += 1;
+            widget.addSpacer(4);
+        }
         widget.addSpacer(2);
       }
     }
