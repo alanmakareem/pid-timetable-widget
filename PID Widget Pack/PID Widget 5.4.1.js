@@ -437,7 +437,7 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
             emitted += 1;
             widget.addSpacer(4);
         }
-        widget.addSpacer(2);
+        widget.addSpacer();
       }
     }
   }
