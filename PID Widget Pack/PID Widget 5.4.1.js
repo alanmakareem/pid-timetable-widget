@@ -146,13 +146,23 @@ async function getLocationWithTimeout(seconds) {
 
 function findSingleClosestStop(location, stopDatabase) {
   if (!stopDatabase || stopDatabase.length === 0) return null;
-  return stopDatabase
-    .map(stop => ({
-      id: stop.id,
-      name: stop.name,
-      distance: haversineDistance(location.latitude, location.longitude, stop.lat, stop.lon),
-    }))
-    .sort((a, b) => a.distance - b.distance)[0];
+
+  let closestStop = null;
+  let minDistance = Infinity;
+
+  for (const stop of stopDatabase) {
+    const distance = haversineDistance(location.latitude, location.longitude, stop.lat, stop.lon);
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestStop = {
+        id: stop.id,
+        name: stop.name,
+        distance: distance,
+      };
+    }
+  }
+
+  return closestStop;
 }
 
 function findAndSortNearbyStops(location, stopDatabase, radiusMeters) {
@@ -336,31 +346,41 @@ async function createWidget(apiResponse, distanceMap, gpsAccuracy) {
     });
 
   // Dynamic rows based on platforms present
-  const MAX_PREVIEW_ROWS = 12;
-  let previewRows = stream.slice(0, MAX_PREVIEW_ROWS);
-
-  const previewBuckets = new Map();
-  for (const it of previewRows) {
-    if (!previewBuckets.has(it.stopIdP)) previewBuckets.set(it.stopIdP, []);
-    previewBuckets.get(it.stopIdP).push(it);
-  }
-  const platformCount = previewBuckets.size;
-
-  let TOTAL_ROWS;
-  if (platformCount == 1) TOTAL_ROWS = 11;
-  else if (platformCount == 2) TOTAL_ROWS = 10;
-  else if (platformCount == 3) TOTAL_ROWS = 9;
-  else if (platformCount == 4) TOTAL_ROWS = 8;
-  else TOTAL_ROWS = 7;
-
-  const picked = stream.slice(0, TOTAL_ROWS);
-
-  // Consolidate strictly by canonical platform to avoid split headers
+  // Greedily pick departures to maximize row density
+  const picked = [];
   const buckets = new Map();
-  for (const it of picked) {
-    if (!buckets.has(it.stopIdP)) buckets.set(it.stopIdP, []);
-    buckets.get(it.stopIdP).push(it);
+
+  for (const it of stream) {
+    // Determine how many platforms we'd have if we included this item
+    const wouldBePlatforms = new Set(buckets.keys());
+    wouldBePlatforms.add(it.stopIdP);
+    const platformCount = wouldBePlatforms.size;
+
+    // Calculate max rows for this platform count
+    let maxRows;
+    if (platformCount === 1) maxRows = 11;
+    else if (platformCount === 2) maxRows = 10;
+    else if (platformCount === 3) maxRows = 9;
+    else if (platformCount === 4) maxRows = 8;
+    else maxRows = 7;
+
+    if (picked.length < maxRows) {
+      picked.push(it);
+      if (!buckets.has(it.stopIdP)) buckets.set(it.stopIdP, []);
+      buckets.get(it.stopIdP).push(it);
+    } else {
+      break;
+    }
   }
+
+  // Update TOTAL_ROWS to the actual max rows we calculated during greedy selection
+  const platformCount = buckets.size;
+  let TOTAL_ROWS;
+  if (platformCount === 1) TOTAL_ROWS = 11;
+  else if (platformCount === 2) TOTAL_ROWS = 10;
+  else if (platformCount === 3) TOTAL_ROWS = 9;
+  else if (platformCount === 4) TOTAL_ROWS = 8;
+  else TOTAL_ROWS = 7;
 
   // Order platforms by distance (closest to furthest)
   const platformOrder = Array.from(buckets.entries())
